@@ -1,0 +1,163 @@
+const int RSol = 2;
+const int LSol = 3;
+const int RArmSol = A0;
+const int LArmSol = A1;
+const int ledPin = 13;  // Pin for LED
+const int EMG_sig = A2;
+
+
+const byte numChars = 64;
+char receivedChars[numChars];
+char tempChars[numChars];
+
+char messageFromPC[numChars] = {0};
+float RightLeg = 0.0;
+float LeftLeg = 0.0;
+float RightArm = 0.0;
+float LeftArm = 0.0;
+float controlValue = 0.0; // Variable for the first value (a)
+
+boolean newData = false;
+
+void setup() {
+  Serial.begin(115200);
+
+  // Setup PWM clock at 10 MHz
+  pmc_enable_periph_clk(ID_PWM);
+  PWMC_ConfigureClocks(10000000, 0, VARIANT_MCK);
+
+  // Channel 7 → Pin 6 → RightLeg
+  setupPWM(7, 200, 0);  // 50kHz
+  PIOC->PIO_PDR |= PIO_PDR_P24;
+  PIOC->PIO_ABSR |= PIO_ABSR_P24;
+
+  // Channel 6 → Pin 7 → LeftLeg
+  setupPWM(6, 200, 0);
+  PIOC->PIO_PDR |= PIO_PDR_P23;
+  PIOC->PIO_ABSR |= PIO_ABSR_P23;
+
+  // Channel 5 → Pin 8 → RightArm
+  setupPWM(5, 200, 0);
+  PIOC->PIO_PDR |= PIO_PDR_P22;
+  PIOC->PIO_ABSR |= PIO_ABSR_P22;
+
+  // Channel 4 → Pin 9 → LeftArm
+  setupPWM(4, 200, 0);
+  PIOC->PIO_PDR |= PIO_PDR_P21;
+  PIOC->PIO_ABSR |= PIO_ABSR_P21;
+
+  // Solenoids
+  pinMode(RSol, OUTPUT);
+  pinMode(LSol, OUTPUT);
+  pinMode(RArmSol, OUTPUT);
+  pinMode(LArmSol, OUTPUT);
+
+  // Default solenoids ON
+  digitalWrite(RSol, HIGH);
+  digitalWrite(LSol, HIGH);
+  digitalWrite(RArmSol, HIGH);
+  digitalWrite(LArmSol, HIGH);
+
+  // Set up LED pin
+  pinMode(ledPin, OUTPUT);
+  digitalWrite(ledPin, LOW);  // LED off by default
+
+
+
+  pinMode(EMG_sig, OUTPUT);
+  digitalWrite(EMG_sig, LOW);  // LED off by default
+  //Serial.println("Send: <a, Rleg, Lleg, Rarm, Larm> where each is 0.0–1.0");
+}
+
+void loop() {
+  recvWithStartEndMarkers();
+  if (newData) {
+    strcpy(tempChars, receivedChars);
+    parseData();
+    newData = false;
+  }
+}
+
+void setupPWM(uint32_t channel, uint32_t period, uint32_t duty) {
+  PWMC_DisableChannel(PWM, channel);
+  PWMC_ConfigureChannel(PWM, channel, PWM_CMR_CPRE_CLKA, 0, 0);
+  PWMC_SetPeriod(PWM, channel, period);
+  PWMC_SetDutyCycle(PWM, channel, duty);
+  PWMC_EnableChannel(PWM, channel);
+}
+
+void recvWithStartEndMarkers() {
+  static boolean recvInProgress = false;
+  static byte ndx = 0;
+  char rc;
+  const char startMarker = '<';
+  const char endMarker = '>';
+
+  while (Serial.available() > 0 && !newData) {
+    rc = Serial.read();
+    if (recvInProgress) {
+      if (rc != endMarker) {
+        receivedChars[ndx++] = rc;
+        if (ndx >= numChars) ndx = numChars - 1;
+      } else {
+        receivedChars[ndx] = '\0';
+        recvInProgress = false;
+        ndx = 0;
+        newData = true;
+      }
+    } else if (rc == startMarker) {
+      recvInProgress = true;
+    }
+  }
+}
+
+void parseData() {
+  char *strtokIndx;
+
+  strtokIndx = strtok(tempChars, ","); // Parse the first value 'a'
+  controlValue = atof(strtokIndx); // Convert 'a' to float
+
+  // Turn the LED on/off based on the value of 'a'
+  if (controlValue > 1.0) {
+    digitalWrite(ledPin, HIGH); // LED on if 'a' > 1.0
+    digitalWrite(EMG_sig, HIGH);  // LED off by default
+
+  
+  } else {
+     digitalWrite(EMG_sig, LOW);
+    digitalWrite(ledPin, LOW); // LED off if 'a' <= 1.0
+  }
+
+  RightLeg = atof(strtok(NULL, ","));
+  LeftLeg = atof(strtok(NULL, ","));
+  RightArm = atof(strtok(NULL, ","));
+  LeftArm = atof(strtok(NULL, ","));
+
+  handlePWMandSolenoid(RightLeg, 7, RSol);
+  handlePWMandSolenoid(LeftLeg, 6, LSol);
+  handlePWMandSolenoid(RightArm, 5, RArmSol);
+  handlePWMandSolenoid(LeftArm, 4, LArmSol);
+}
+
+void handlePWMandSolenoid(float value, uint32_t channel, int solenoidPin) {
+  if (value > 0.0 && value <= 1.0) {
+    PWMC_SetDutyCycle(PWM, channel, int((value / 3.3) * 200));
+    digitalWrite(solenoidPin, LOW);
+  } else {
+    PWMC_SetDutyCycle(PWM, channel, 0);
+    digitalWrite(solenoidPin, HIGH);
+  }
+}
+
+void sendFeedback() {
+  Serial.print("Received: a=");
+  Serial.print(controlValue, 3);
+  Serial.print(" Rleg=");
+  Serial.print(RightLeg, 3);
+  Serial.print(" Lleg=");
+  Serial.print(LeftLeg, 3);
+  Serial.print(" Rarm=");
+  Serial.print(RightArm, 3);
+  Serial.print(" Larm=");
+  Serial.println(LeftArm, 3);
+}
