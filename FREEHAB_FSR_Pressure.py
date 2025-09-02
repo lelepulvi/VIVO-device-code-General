@@ -890,7 +890,8 @@ if __name__ == "__main__":
             # print("here")
             
 
-            ## Calculate Threshold #################################################################################
+            ## Calculate FSR Threshold #################################################################################
+            ### USE if switch.value is 0
             
             if switch.value == 0:  ##############   FSR
                 if FSRrh.value> 1.5: #2.4:     #2.5
@@ -911,7 +912,9 @@ if __name__ == "__main__":
                 # to change to this one
                 toeR.value = 0 if FSRrt.value > 1.5 else 1
             
-            ########### Foot Pressure
+            ########### Threshold for Foot Pressure ######
+            #####    use this if switch.value is 1
+            
             else:
                 if FSRrh.value> 800: #2.4:     #2.5
                     heelR.value = 0
@@ -1296,3 +1299,4 @@ if __name__ == "__main__":
 
    # main()
     
+
