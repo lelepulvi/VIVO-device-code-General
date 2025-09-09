@@ -33,5 +33,5 @@ python tests/AdaptiveThreshold_FSR_TEST.py
 
 pgsql
 Copy code
-By default this uses `tests/example_data/example_fsr.csv`.  
+By default this uses `tests/example_data/example_FSR_Data.csv`.  
 Adjust the path/column numbers at the bottom of the tester script to analyse your own CSVs.
