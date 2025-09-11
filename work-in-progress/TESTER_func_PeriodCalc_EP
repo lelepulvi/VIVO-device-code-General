@@ -1,0 +1,275 @@
+# ---- synthetic_tester_period_fsr.py ----
+# adaptive_replay_tester.py
+import threading, time as _rt, math, copy
+import numpy as np
+import pandas as pd
+from collections import deque
+from pathlib import Path
+# ---------- 1) Your AdaptiveFSR (paste exactly as you have it) ----------
+# (Shortened here): import your AdaptiveFSR class from your module instead:
+# from adaptive_fsr import AdaptiveFSR
+# -- BEGIN: paste your AdaptiveFSR here --
+class AdaptiveFSR:
+    def __init__(self, init_contact=None, init_nocontact=None,
+                 ema_alpha=0.2, hysteresis_frac=0.10,
+                 min_contact_ms=60, min_release_ms=60, min_dwell_ms=120,
+                 clip_band_min=0.02, clip_band_max=1e6, learn_window_steps=6):
+        self.alpha = ema_alpha
+        self.hfrac = hysteresis_frac
+        self.min_contact = min_contact_ms / 1000.0
+        self.min_release = min_release_ms / 1000.0
+        self.min_dwell   = min_dwell_ms   / 1000.0
+        self.clip_band_min = clip_band_min
+        self.clip_band_max = clip_band_max
+
+        self.contact_level   = init_contact
+        self.nocontact_level = init_nocontact
+
+        self.curr_min = math.inf
+        self.curr_max = -math.inf
+
+        self.min_hist = deque(maxlen=learn_window_steps)
+        self.max_hist = deque(maxlen=learn_window_steps)
+
+        self.state = 0
+        self.last_change_t = 0.0
+        self.last_contact_tentative = None
+        self.last_release_tentative = None
+
+        self.mid = None
+        self.lower = None
+        self.upper = None
+
+# After each confirmed dwell, take the median of recent mins/maxes, then update contact_level 
+# and nocontact_level with an EMA (so it adapts step-by-step but doesn’t jitter).
+    def _update_levels_from_cycle(self):
+        if self.curr_min < math.inf:
+            self.min_hist.append(self.curr_min)
+        if self.curr_max > -math.inf:
+            self.max_hist.append(self.curr_max)
+
+        if len(self.min_hist):
+            new_contact = sorted(self.min_hist)[len(self.min_hist)//2]
+            self.contact_level = (new_contact if self.contact_level is None
+                                  else (1 - self.alpha) * self.contact_level + self.alpha * new_contact)
+        if len(self.max_hist):
+            new_noc = sorted(self.max_hist)[len(self.max_hist)//2]
+            self.nocontact_level = (new_noc if self.nocontact_level is None
+                                    else (1 - self.alpha) * self.nocontact_level + self.alpha * new_noc)
+
+        self.curr_min = math.inf
+        self.curr_max = -math.inf
+# Compute the midpoint and hysteresis band (lower, upper) from the learned levels.
+    def _recompute_bands(self):
+        if (self.contact_level is None) or (self.nocontact_level is None):
+            self.mid = self.lower = self.upper = None
+            return
+        rng = max(1e-9, abs(self.nocontact_level - self.contact_level))
+        band = max(self.clip_band_min, min(self.clip_band_max, self.hfrac * rng))
+        self.mid = 0.5 * (self.contact_level + self.nocontact_level)
+        self.lower = self.mid - band
+        self.upper = self.mid + band
+
+    def update(self, v, t=None):
+        """
+        v: current raw sensor reading (FSR/pressure)
+        t: timestamp in seconds (optional)
+        """
+        if t is None:
+            t = time.perf_counter()
+
+        # track extrema in current dwell
+        if v < self.curr_min:
+            self.curr_min = v
+        if v > self.curr_max:
+            self.curr_max = v
+
+        self._recompute_bands()
+        dt_since_change = t - self.last_change_t
+
+        # bootstrap
+        if self.mid is None:
+            if dt_since_change > 0.25:
+                self._update_levels_from_cycle()
+                self._recompute_bands()
+            return self.state, self.lower, self.mid, self.upper
+
+        # hysteresis + debounce + min dwell
+        if self.state == 0:  # no-contact
+            if v <= self.lower and dt_since_change >= self.min_dwell:
+                if self.last_contact_tentative is None:
+                    self.last_contact_tentative = t
+                elif (t - self.last_contact_tentative) >= self.min_contact:
+                    self._update_levels_from_cycle()
+                    self.state = 1
+                    self.last_change_t = t
+                    self.last_contact_tentative = None
+                    self.curr_min = v
+                    self.curr_max = v
+            else:
+                self.last_contact_tentative = None
+        else:  # contact
+            if v >= self.upper and dt_since_change >= self.min_dwell:
+                if self.last_release_tentative is None:
+                    self.last_release_tentative = t
+                elif (t - self.last_release_tentative) >= self.min_release:
+                    self._update_levels_from_cycle()
+                    self.state = 0
+                    self.last_change_t = t
+                    self.last_release_tentative = None
+                    self.curr_min = v
+                    self.curr_max = v
+            else:
+                self.last_release_tentative = None
+
+        return self.state, self.lower, self.mid, self.upper
+# -- END: AdaptiveFSR --
+
+
+# === Paste your Period_FSR here (with your current right-heel changes) ===
+# from time import perf_counter  <-- we will override perf_counter below with a simulated clock
+# ... your Period_FSR definition ...
+def Period_FSR(heelR,heelL,toeR,toeL, HPeriod_available_R, HPeriod_available_L,HeelRp, HeelLp,Allexit,TPeriod_available_R, TPeriod_available_L,ToeRp, ToeLp,gaitR, gaitL):
+    
+     # Right heel
+     heelcountR = 0         # Right heel strike count
+     heelcountR_flag = 0    # Flag to enable state change
+     heelcountTime_R =0     # exact time of strike
+     Previous_heelcountTime_R = 0   
+     timeHeelR = 0          # period between strike
+     timeHeelR_avg = 0      # average of period between last three strikes
+     heel_periods_R = deque(maxlen=3) # list for last three periods
+     # Left heel
+     heelcountL, heelcountL_flag, heelcountTime_L, Previous_heelcountTime_L, timeHeelL, timeHeelL_avg = 0,0,0,0,0,0
+     # Right toe
+     toecountR, toecountTime_R, Previous_toecountTime_R, timetoeR, timetoeR_avg, forToeR = 0,0,0,0,0,0 
+     toecountR_flag = 1   
+     # Left toe
+     toecountL, toecountTime_L, Previous_toecountTime_L, timetoeL, timetoeL_avg, forToeL = 0,0,0,0,0,0 
+     toecountL_flag = 1
+     
+     try: # add try: to identify problem when the codes fail.
+      #print("Came to FSR...", flush=True)
+      while not Allexit.value:
+        ## Right heel strike #########################################################
+         HeelStateR = copy.copy(heelR.value)
+        # print("1", flush=True)   
+        # HeelStateR indicates heel is touched
+         if HeelStateR == 1 and heelcountR_flag == 0:
+             heelcountR_flag = 1
+             heelcountTime_R = perf_counter() # stores the exact time of heel strike
+             if heelcountR == 0:
+                  gaitR.value = heelcountTime_R # gaitR is global variable for the exact time of heel strike
+             forToeR = copy.copy(heelcountTime_R) # to use in the toe off time calculation
+             heelcountR = heelcountR +1  # increase counter by 1
+            # Prev_heelcountTime_R = perf_counter()
+             #print("here")   
+             if heelcountR> 1:
+                  time_bet_heel_R = heelcountTime_R - Previous_heelcountTime_R # time between two consecutive heel strikes
+                  #timeHeelR = timeHeelR + time_bet_heel_R # running sum of intervals
+                  heel_periods_R.append(time_bet_heel_R) # add to the list, autmoatically removes the oldest entry if more than 3
+            #### OLD METHOD ####
+            #  if heelcountR == 3:
+            #      timeHeelR_avg = timeHeelR/3 
+            #      timeHeelR = 0
+            #      heelcountR = 0 
+            #      gaitR.value =  perf_counter()
+            #  Previous_heelcountTime_R = heelcountTime_R
+
+              ### NEW METHOD --- START ###
+             if len(heel_periods_R) == 3: # when the length of the list reaches 3, start calculating average
+                    timeHeelR_avg = sum(heel_periods_R) / 3
+                    gaitR.value =  perf_counter()
+             Previous_heelcountTime_R = heelcountTime_R
+               ### NEW METHOD --- END ###
+
+         if HeelStateR == 0 and heelcountR_flag == 1:
+              heelcountR_flag = 0
+              # timeHeel is actually the gait period
+              #print("here")
+
+         if timeHeelR_avg != 0:
+              HPeriod_available_R.value = 1
+              HeelRp.value = copy.copy(timeHeelR_avg)
+              timeHeelR_avg = 0   
+     except Exception as e:
+            import traceback
+            print("FSR crashed", e , flush=True )
+            traceback.print_exc()                  
+
+# --- Minimal mock for multiprocessing.Value-like objects ---
+class SharedVal:
+    def __init__(self, v=0):
+        self.value = v
+
+# --- Simulated monotonic clock to replace perf_counter used inside Period_FSR ---
+class SimClock:
+    def __init__(self, t0=0.0): self.t = float(t0)
+    def now(self): return self.t
+    def advance(self, dt): self.t += float(dt)
+
+def run_synthetic_test():
+    # 1) Synthetic right-foot periods (seconds); tweak to taste
+    periods = [0.62, 0.60, 0.61, 0.59, 0.63, 0.60, 0.58, 0.61]
+
+    # 2) Build absolute HS times
+    hs_times_R = [0.0]
+    for p in periods:
+        hs_times_R.append(hs_times_R[-1] + p)
+    hs_times_R = hs_times_R[1:]  # drop the initial 0.0 if you prefer
+
+    # 3) Create shared variables expected by Period_FSR
+    heelR = SharedVal(0); heelL = SharedVal(0)
+    toeR  = SharedVal(1); toeL  = SharedVal(1)   # idle; we’re not testing toes here
+
+    HPeriod_available_R = SharedVal(0); HPeriod_available_L = SharedVal(0)
+    TPeriod_available_R = SharedVal(0); TPeriod_available_L = SharedVal(0)
+
+    HeelRp = SharedVal(0.0); HeelLp = SharedVal(0.0)
+    ToeRp  = SharedVal(0.0); ToeLp  = SharedVal(0.0)
+
+    gaitR = SharedVal(0.0); gaitL = SharedVal(0.0)
+    Allexit = SharedVal(False)
+
+    # 4) Simulated clock: override the perf_counter symbol used by Period_FSR
+    sim = SimClock(t0=0.0)
+    globals()['perf_counter'] = sim.now  # IMPORTANT: matches the name used inside your function
+
+    # 5) Start Period_FSR in a background thread
+    th = threading.Thread(
+        target=Period_FSR,
+        args=(heelR, heelL, toeR, toeL,
+              HPeriod_available_R, HPeriod_available_L, HeelRp, HeelLp,
+              Allexit,
+              TPeriod_available_R, TPeriod_available_L, ToeRp, ToeLp,
+              gaitR, gaitL),
+        daemon=True
+    )
+    th.start()
+
+    # 6) Feed heel-strike pulses at the scheduled (simulated) times
+    t_prev = 0.0
+    for t_hs in hs_times_R:
+        # advance simulated time to the next HS (strictly increasing)
+        sim.advance(t_hs - t_prev + 1e-6)
+        t_prev = t_hs
+
+        # Heel strike pulse: 0 -> 1 -> 0 (your state machine reads HeelStateR==1 on rising)
+        heelR.value = 1
+        _rt.sleep(0.002)     # let the loop tick
+        heelR.value = 0
+        _rt.sleep(0.002)
+
+        # If your function published an average, print and consume the flag
+        if HPeriod_available_R.value == 1:
+            print(f"t={sim.now():.3f}s  rolling_avg_R = {HeelRp.value:.3f} s")
+            HPeriod_available_R.value = 0
+
+    # 7) Stop the worker and join
+    Allexit.value = True
+    th.join(timeout=0.5)
+    print("Synthetic test complete.")
+
+if __name__ == "__main__":
+    # Ensure your Period_FSR is defined above, then run:
+    run_synthetic_test()
