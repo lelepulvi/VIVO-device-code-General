@@ -22,6 +22,7 @@ IF Foot Pressure is being used, change thresholds in LINE 915
 - openzen.pyd and SiUSBXP.dll are required to be placed in the same directory 
 - Arduino is the C code for Arduino DUE
 
+
 ## Adaptive Thresholds
 
 We now use `adaptive_fsr.py` for dynamic thresholds on FSRs or pressure sensors.
@@ -35,3 +36,6 @@ pgsql
 Copy code
 By default this uses `tests/example_data/example_FSR_Data.csv`.  
 Adjust the path/column numbers at the bottom of the tester script to analyse your own CSVs.
+=======
+- PlotNow_seperate is for plotting data
+
