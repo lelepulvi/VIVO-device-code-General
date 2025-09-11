@@ -21,4 +21,4 @@ IF Foot Pressure is being used, change thresholds in LINE 915
 
 - openzen.pyd and SiUSBXP.dll are required to be placed in the same directory 
 - Arduino is the C code for Arduino DUE
-
+- PlotNow_seperate is for plotting data
