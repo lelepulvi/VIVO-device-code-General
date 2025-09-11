@@ -5,12 +5,13 @@ import numpy as np
 import pandas as pd
 from collections import deque
 from pathlib import Path
+import matplotlib.pyplot as plt
 # ---------- 1) Your AdaptiveFSR (paste exactly as you have it) ----------
 # (Shortened here): import your AdaptiveFSR class from your module instead:
 # from adaptive_fsr import AdaptiveFSR
 # -- BEGIN: paste your AdaptiveFSR here --
 class AdaptiveFSR:
-    def __init__(self, init_contact=None, init_nocontact=None,
+    def __init__(self, init_contact=0.2, init_nocontact=1.0,
                  ema_alpha=0.2, hysteresis_frac=0.10,
                  min_contact_ms=60, min_release_ms=60, min_dwell_ms=120,
                  clip_band_min=0.02, clip_band_max=1e6, learn_window_steps=6):
@@ -96,7 +97,7 @@ class AdaptiveFSR:
 
         # hysteresis + debounce + min dwell
         if self.state == 0:  # no-contact
-            if v <= self.lower and dt_since_change >= self.min_dwell:
+            if v >= self.upper and dt_since_change >= self.min_dwell:
                 if self.last_contact_tentative is None:
                     self.last_contact_tentative = t
                 elif (t - self.last_contact_tentative) >= self.min_contact:
@@ -109,7 +110,7 @@ class AdaptiveFSR:
             else:
                 self.last_contact_tentative = None
         else:  # contact
-            if v >= self.upper and dt_since_change >= self.min_dwell:
+            if v <= self.lower and dt_since_change >= self.min_dwell:
                 if self.last_release_tentative is None:
                     self.last_release_tentative = t
                 elif (t - self.last_release_tentative) >= self.min_release:
@@ -208,34 +209,99 @@ class SimClock:
     def now(self): return self.t
     def advance(self, dt): self.t += float(dt)
 
-def run_synthetic_test():
-    # 1) Synthetic right-foot periods (seconds); tweak to taste
-    periods = [0.62, 0.60, 0.61, 0.59, 0.63, 0.60, 0.58, 0.61]
+# ---------- CSV + AdaptiveFSR replay ----------
 
-    # 2) Build absolute HS times
-    hs_times_R = [0.0]
-    for p in periods:
-        hs_times_R.append(hs_times_R[-1] + p)
-    hs_times_R = hs_times_R[1:]  # drop the initial 0.0 if you prefer
+def run_csv_test(csv_path, time_col=0, fsr_col=1, smoothing_win=5,
+                 det_kwargs=None, loop_sleep=0.001):
+    det_kwargs = det_kwargs or dict(hysteresis_frac=0.10, min_contact_ms=50,
+                                    min_release_ms=50, min_dwell_ms=100)
 
-    # 3) Create shared variables expected by Period_FSR
+    df = pd.read_csv(Path(csv_path), header=None, low_memory=False)
+
+    # Time vector
+    t = pd.to_numeric(df.iloc[:, time_col], errors="coerce").to_numpy()
+    t = t - (t[0] if len(t) else 0.0)
+    if np.any(np.diff(t) < 0):
+        dt_med = float(np.nanmedian(np.diff(t[np.diff(t) >= 0])))
+        if not np.isfinite(dt_med) or dt_med <= 0: dt_med = 0.01
+        t = np.arange(len(df)) * dt_med
+
+    # Raw signal (right heel volts)
+    v_raw = pd.to_numeric(df.iloc[:, fsr_col], errors="coerce").to_numpy()
+    v = v_raw.copy()
+
+    # Optional smoothing for detection (raw stays raw for plotting)
+    if smoothing_win and smoothing_win > 1:
+        k = int(smoothing_win)
+        v = np.convolve(v_raw, np.ones(k)/k, mode="same")
+
+    # Binarise with AdaptiveFSR and capture thresholds
+    det = AdaptiveFSR(**det_kwargs)
+    det.last_change_t = float(t[0]) if len(t) else 0.0
+
+    state = np.zeros_like(v_raw, dtype=int)
+    lower = np.full_like(v_raw, np.nan, dtype=float)
+    mid   = np.full_like(v_raw, np.nan, dtype=float)
+    upper = np.full_like(v_raw, np.nan, dtype=float)
+
+    for i in range(len(t)):
+        s, lo, md, up = det.update(float(v_raw[i]), float(t[i]))
+        state[i] = s
+        lower[i] = lo if lo is not None else np.nan
+        mid[i]   = md if md is not None else np.nan
+        upper[i] = up if up is not None else np.nan
+
+    # Heel strikes = rising edges of the binarised state
+    trans = np.diff(state, prepend=state[0])
+    hs_idx = np.where(trans == 1)[0]
+    hs_times = t[hs_idx].tolist()
+
+    # ---- PLOT: raw FSR + thresholds + HS (top)  AND  binarised + HS (bottom) ----
+    fig, (ax_top, ax_bot) = plt.subplots(2, 1, figsize=(12, 6), sharex=True, gridspec_kw={'hspace': 0.18})
+
+    # TOP: raw FSR + adaptive thresholds + HS markers on raw
+    ax_top.plot(t, v_raw, linewidth=1.0, label="FSR (raw)")
+    ax_top.plot(t, mid,   linewidth=1.0, label="Adaptive mid")
+    ax_top.plot(t, lower, linewidth=1.0, label="Adaptive lower")
+    ax_top.plot(t, upper, linewidth=1.0, label="Adaptive upper")
+    if len(hs_idx):
+        ax_top.plot(t[hs_idx], v_raw[hs_idx],
+                    linestyle="None", marker="o", markersize=5,
+                    color="red", label="HS (from 0→1)", zorder=3)
+    ax_top.set_title("FSR Right Heel: raw + adaptive thresholds (top), binarised + HS (bottom)")
+    ax_top.set_ylabel("FSR voltage (raw)")
+    ax_top.legend(loc="best")
+
+    # BOTTOM: binarised state + HS markers at y=1
+    ax_bot.step(t, state, where="post", linewidth=1.0, label="Binarised (contact=1)")
+    if len(hs_idx):
+        ax_bot.plot(t[hs_idx], np.ones_like(hs_idx),
+                    linestyle="None", marker="o", markersize=5,
+                    color="red", label="HS (from 0→1)", zorder=3)
+    ax_bot.set_ylim(-0.1, 1.1)
+    ax_bot.set_yticks([0, 1])
+    ax_bot.set_yticklabels(["off", "on"])
+    ax_bot.set_xlabel("Time (s)")
+    ax_bot.set_ylabel("State")
+    ax_bot.legend(loc="best")
+
+    plt.tight_layout()
+    plt.show()
+    # ---- /PLOT ----
+    
+    # ---- (unchanged) replay into Period_FSR to compute rolling averages ----
     heelR = SharedVal(0); heelL = SharedVal(0)
-    toeR  = SharedVal(1); toeL  = SharedVal(1)   # idle; we’re not testing toes here
-
+    toeR  = SharedVal(1); toeL  = SharedVal(1)
     HPeriod_available_R = SharedVal(0); HPeriod_available_L = SharedVal(0)
     TPeriod_available_R = SharedVal(0); TPeriod_available_L = SharedVal(0)
-
     HeelRp = SharedVal(0.0); HeelLp = SharedVal(0.0)
     ToeRp  = SharedVal(0.0); ToeLp  = SharedVal(0.0)
-
     gaitR = SharedVal(0.0); gaitL = SharedVal(0.0)
     Allexit = SharedVal(False)
 
-    # 4) Simulated clock: override the perf_counter symbol used by Period_FSR
     sim = SimClock(t0=0.0)
-    globals()['perf_counter'] = sim.now  # IMPORTANT: matches the name used inside your function
+    globals()['perf_counter'] = sim.now
 
-    # 5) Start Period_FSR in a background thread
     th = threading.Thread(
         target=Period_FSR,
         args=(heelR, heelL, toeR, toeL,
@@ -247,29 +313,27 @@ def run_synthetic_test():
     )
     th.start()
 
-    # 6) Feed heel-strike pulses at the scheduled (simulated) times
-    t_prev = 0.0
-    for t_hs in hs_times_R:
-        # advance simulated time to the next HS (strictly increasing)
-        sim.advance(t_hs - t_prev + 1e-6)
-        t_prev = t_hs
+    emissions = []
+    prev = 0.0
+    for t_hs in hs_times:
+        sim.advance(float(t_hs - prev) + 1e-9)
+        prev = float(t_hs)
+        heelR.value = 1; _rt.sleep(loop_sleep)
+        heelR.value = 0; _rt.sleep(loop_sleep)
 
-        # Heel strike pulse: 0 -> 1 -> 0 (your state machine reads HeelStateR==1 on rising)
-        heelR.value = 1
-        _rt.sleep(0.002)     # let the loop tick
-        heelR.value = 0
-        _rt.sleep(0.002)
-
-        # If your function published an average, print and consume the flag
         if HPeriod_available_R.value == 1:
-            print(f"t={sim.now():.3f}s  rolling_avg_R = {HeelRp.value:.3f} s")
+            emissions.append((sim.now(), float(HeelRp.value)))
+            print(f"[t={sim.now():.3f}] R HS→HS avg(3): {HeelRp.value:.3f} s")
             HPeriod_available_R.value = 0
 
-    # 7) Stop the worker and join
     Allexit.value = True
-    th.join(timeout=0.5)
-    print("Synthetic test complete.")
+    th.join(timeout=1.0)
+    print(f"CSV replay complete. HS detected: {len(hs_times)}, emissions: {len(emissions)}")
+    return emissions, hs_times
 
+
+# ---------- Main ----------
 if __name__ == "__main__":
-    # Ensure your Period_FSR is defined above, then run:
-    run_synthetic_test()
+    # >>> SET YOUR CSV PATH HERE <<<
+    CSV_PATH = "C:/Users/ep15603/OneDrive - University of Bristol/Desktop/VIVO hub/3. STS-Walking device/2. Python scripts/example_FSR_Data.csv"  # col0=time(s), col1=Right Heel FSR volts
+    run_csv_test(CSV_PATH, time_col=0, fsr_col=1, smoothing_win=5)
