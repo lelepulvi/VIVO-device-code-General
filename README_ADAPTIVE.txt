@@ -1,4 +1,22 @@
 
+a few changes in the main
+
+-having a switch for IMU on/off
+-Actuation is considering the previous heel strikes, and new functions added
+
+
+In the Adaptive FSR, I changed the following (< to > and > to <)
+
+   if self.state == 0:  # no-contact
+      if v **>**= self.lower and dt_since_change >= self.min_dwell:
+   else:  # contact
+      if v **<**= self.upper and dt_since_change >= self.min_dwell:
+
+init_contact=None, init_nocontact=None, --------> init_contact=0.2, init_nocontact=1.0
+
+
+
+
 # README — Using Adaptive Thresholding in FREEHAB_FSR_Pressure.py
 
 ## Purpose
