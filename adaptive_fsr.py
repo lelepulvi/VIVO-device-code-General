@@ -12,7 +12,7 @@ from collections import deque
 # AdaptiveFSR CLASS (top)
 # =========================
 class AdaptiveFSR:
-    def __init__(self, init_contact=None, init_nocontact=None,
+    def __init__(self, init_contact=0.2, init_nocontact=1,
                  ema_alpha=0.2, hysteresis_frac=0.10,
                  min_contact_ms=60, min_release_ms=60, min_dwell_ms=120,
                  clip_band_min=0.02, clip_band_max=1e6, learn_window_steps=6):
@@ -98,7 +98,7 @@ class AdaptiveFSR:
 
         # hysteresis + debounce + min dwell
         if self.state == 0:  # no-contact
-            if v <= self.lower and dt_since_change >= self.min_dwell:
+            if v >= self.lower and dt_since_change >= self.min_dwell:
                 if self.last_contact_tentative is None:
                     self.last_contact_tentative = t
                 elif (t - self.last_contact_tentative) >= self.min_contact:
@@ -111,7 +111,7 @@ class AdaptiveFSR:
             else:
                 self.last_contact_tentative = None
         else:  # contact
-            if v >= self.upper and dt_since_change >= self.min_dwell:
+            if v <= self.upper and dt_since_change >= self.min_dwell:
                 if self.last_release_tentative is None:
                     self.last_release_tentative = t
                 elif (t - self.last_release_tentative) >= self.min_release:
