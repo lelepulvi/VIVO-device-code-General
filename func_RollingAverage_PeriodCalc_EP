@@ -1,0 +1,157 @@
+## Function: calculate FSR period ####################################################
+from collections import deque
+
+def Period_FSR(heelR,heelL,toeR,toeL, HPeriod_available_R, HPeriod_available_L,HeelRp, HeelLp,Allexit,TPeriod_available_R, TPeriod_available_L,ToeRp, ToeLp,gaitR, gaitL):
+    
+     # Right heel
+     heelcountR = 0         # Right heel strike count
+     heelcountR_flag = 0    # Flag to enable state change
+     heelcountTime_R =0     # exact time of strike
+     Previous_heelcountTime_R = 0   
+     timeHeelR = 0          # period between strike
+     timeHeelR_avg = 0      # average of period between last three strikes
+     heel_periods_R = deque(maxlen=3) # list for last three periods
+     # Left heel
+     heelcountL, heelcountL_flag, heelcountTime_L, Previous_heelcountTime_L, timeHeelL, timeHeelL_avg = 0,0,0,0,0,0
+     # Right toe
+     toecountR, toecountTime_R, Previous_toecountTime_R, timetoeR, timetoeR_avg, forToeR = 0,0,0,0,0,0 
+     toecountR_flag = 1   
+     # Left toe
+     toecountL, toecountTime_L, Previous_toecountTime_L, timetoeL, timetoeL_avg, forToeL = 0,0,0,0,0,0 
+     toecountL_flag = 1
+     
+     try: # add try: to identify problem when the codes fail.
+      #print("Came to FSR...", flush=True)
+      while not Allexit.value:
+        ## Right heel strike #########################################################
+         HeelStateR = copy.copy(heelR.value)
+        # print("1", flush=True)   
+        # HeelStateR indicates heel is touched
+         if HeelStateR == 1 and heelcountR_flag == 0:
+             heelcountR_flag = 1
+             heelcountTime_R = perf_counter() # stores the exact time of heel strike
+             if heelcountR == 0:
+                  gaitR.value = heelcountTime_R # gaitR is global variable for the exact time of heel strike
+             forToeR = copy.copy(heelcountTime_R) # to use in the toe off time calculation
+             heelcountR = heelcountR +1  # increase counter by 1
+            # Prev_heelcountTime_R = perf_counter()
+             #print("here")   
+             if heelcountR> 1:
+                  time_bet_heel_R = heelcountTime_R - Previous_heelcountTime_R # time between two consecutive heel strikes
+                  #timeHeelR = timeHeelR + time_bet_heel_R # running sum of intervals
+                  heel_periods_R.append(time_bet_heel_R) # add to the list, autmoatically removes the oldest entry if more than 3
+            #### OLD METHOD ####
+            #  if heelcountR == 3:
+            #      timeHeelR_avg = timeHeelR/3 
+            #      timeHeelR = 0
+            #      heelcountR = 0 
+            #      gaitR.value =  perf_counter()
+            #  Previous_heelcountTime_R = heelcountTime_R
+
+              ### NEW METHOD --- START ###
+             if len(heel_periods_R) == 3: # when the length of the list reaches 3, start calculating average
+                    timeHeelR_avg = sum(heel_periods_R) / 3
+                    gaitR.value =  perf_counter()
+             Previous_heelcountTime_R = heelcountTime_R
+               ### NEW METHOD --- END ###
+
+         if HeelStateR == 0 and heelcountR_flag == 1:
+              heelcountR_flag = 0
+              # timeHeel is actually the gait period
+              #print("here")
+
+         if timeHeelR_avg != 0:
+              HPeriod_available_R.value = 1
+              HeelRp.value = copy.copy(timeHeelR_avg)
+              timeHeelR_avg = 0   
+
+        ## Left heel strike #########################################################
+         HeelStateL = copy.copy(heelL.value)
+         #print("here")   
+         if HeelStateL == 1 and heelcountL_flag == 0:
+             heelcountL_flag = 1
+             heelcountTime_L = perf_counter()
+             forToeL = copy.copy(heelcountTime_L)
+             heelcountL = heelcountL +1  
+            # Prev_heelcountTime_R = perf_counter()
+             #print("here")   
+             if heelcountL> 1:
+                  time_bet_heel_L = heelcountTime_L - Previous_heelcountTime_L 
+                  timeHeelL = timeHeelL + time_bet_heel_L 
+             if heelcountL == 3:
+                 timeHeelL_avg = timeHeelL/3 
+                 timeHeelL = 0
+                 heelcountL = 0   
+             Previous_heelcountTime_L = heelcountTime_L
+         if HeelStateL == 0 and heelcountL_flag == 1:
+              heelcountL_flag = 0
+              
+              #print("here")
+
+         if timeHeelL_avg != 0:
+              HPeriod_available_L.value = 1
+              HeelLp.value = copy.copy(timeHeelL_avg)
+              timeHeelL_avg = 0   
+
+        ## Right toe off #########################################################
+        # update time of every completed three gaits
+        # timetoe is the time from the gait starts till toe off
+         ToeStateR = copy.copy(toeR.value)
+         #print("here")   
+         if ToeStateR == 0 and toecountR_flag == 0:
+             toecountR_flag = 1
+             toecountTime_R = perf_counter() - forToeR
+             toecountR = toecountR +1  
+              
+             if toecountR> 1:
+                  #time_bet_toe_R = toecountTime_R - Previous_toecountTime_R 
+                  timetoeR = previousTimetoeR + toecountTime_R 
+             previousTimetoeR = toecountTime_R
+             if toecountR == 3:
+                 timetoeR_avg = timetoeR/3 
+                 timetoeR = 0
+                 toecountR = 0
+                 previousTimetoeR = 0   
+             Previous_toecountTime_R = toecountTime_R
+         if ToeStateR == 1 and toecountR_flag == 1:
+              toecountR_flag = 0
+              
+              #print("here")
+
+         if timetoeR_avg != 0:
+              TPeriod_available_R.value = 1
+              ToeRp.value = copy.copy(timetoeR_avg)
+              timetoeR_avg = 0              
+
+        ## Left toe off #########################################################       
+         ToeStateL = copy.copy(toeL.value)
+         #print("here")   
+         if ToeStateL == 0 and toecountL_flag == 0:
+             toecountL_flag = 1
+             toecountTime_L = perf_counter() - forToeL
+             toecountL = toecountL +1  
+              
+             if toecountL> 1:
+                  #time_bet_toe_R = toecountTime_R - Previous_toecountTime_R 
+                  timetoeL = previousTimetoeL + toecountTime_L 
+             previousTimetoeL = toecountTime_L
+             if toecountL == 3:
+                 timetoeL_avg = timetoeL/3 
+                 timetoeL = 0
+                 toecountL = 0
+                 previousTimetoeL = 0   
+             Previous_toecountTime_L = toecountTime_L
+         if ToeStateL == 1 and toecountL_flag == 1:
+              toecountL_flag = 0
+              
+              #print("here")
+
+         if timetoeL_avg != 0:
+              TPeriod_available_L.value = 1
+              ToeLp.value = copy.copy(timetoeL_avg)
+              timetoeL_avg = 0              
+              
+     except Exception as e:
+            import traceback
+            print("FSR crashed", e , flush=True )
+            traceback.print_exc()                  
