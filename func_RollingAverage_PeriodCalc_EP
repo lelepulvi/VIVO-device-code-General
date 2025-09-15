@@ -81,7 +81,7 @@ def Period_FSR(heelR,heelL,toeR,toeL, HPeriod_available_R, HPeriod_available_L,H
              if heelcountL> 1:
                   time_bet_heel_L = heelcountTime_L - Previous_heelcountTime_L 
                   #timeHeelL = timeHeelL + time_bet_heel_L 
-                  heel_periods_L.append(time_bet_heel_l) # add to the list, autmoatically removes the oldest entry if more than 3
+                  heel_periods_L.append(time_bet_heel_L) # add to the list, autmoatically removes the oldest entry if more than 3
              #if heelcountL == 3:
               #   timeHeelL_avg = timeHeelL/3 
                #  timeHeelL = 0
