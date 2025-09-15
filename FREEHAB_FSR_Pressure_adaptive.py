@@ -98,41 +98,76 @@ def connectSensors():
 
     print ("Connecting to Sensors")
     # Connect to sensor1
-    error, sensor1 = client.obtain_sensor_by_name("Bluetooth", sensor1MacID)
-    if not error == openzen.ZenError.NoError:
-        print ("Error connecting to right thigh", sensor1MacID)
-        quit = True
-        sys.exit(1)
+    
+    while True:
+        error, sensor1 = client.obtain_sensor_by_name("Bluetooth", sensor1MacID)
+        print("Trying to connect Right Thigh...press E to quit")
+        if keyboard.is_pressed("e"):
+            quit = True
+            sys.exit(1)
+        if not error != openzen.ZenError.NoError: 
+            break
+    #if not error == openzen.ZenError.NoError:
+    #    print ("Error connecting to right thigh", sensor1MacID)
+    #    quit = True
+    #    sys.exit(1)
     imu1 = sensor1.get_any_component_of_type(openzen.component_type_imu)
 
     # Connect to sensor2
-    error, sensor2 = client.obtain_sensor_by_name("Bluetooth", sensor2MacID)
-    if not error == openzen.ZenError.NoError:
-        print ("Error connecting to right shank", sensor2MacID)
-        quit = True
-        sys.exit(1)
+    while True:
+        error, sensor2 = client.obtain_sensor_by_name("Bluetooth", sensor2MacID)
+        print("Trying to connect Right Shank...press E to quit")
+        if keyboard.is_pressed("e"):
+            quit = True
+            sys.exit(1)
+        
+        
+        if not error != openzen.ZenError.NoError:
+            break
+            #print ("Error connecting to right shank", sensor2MacID)
+            #quit = True
+            #sys.exit(1)
     imu2 = sensor2.get_any_component_of_type(openzen.component_type_imu)
 
     # Connect to sensor3
-    error, sensor3 = client.obtain_sensor_by_name("Bluetooth", sensor3MacID)
-    if not error == openzen.ZenError.NoError:
-        print ("Error connecting to left thigh", sensor3MacID)
-        quit = True
-        sys.exit(1)
+    while True:
+        error, sensor3 = client.obtain_sensor_by_name("Bluetooth", sensor3MacID)
+        print("Trying to connect Left Thigh...press E to quit")
+        if keyboard.is_pressed("e"):
+            quit = True
+            sys.exit(1)
+        
+        if not error != openzen.ZenError.NoError:
+            break
+            #print ("Error connecting to left thigh", sensor3MacID)
+            #quit = True
+            #sys.exit(1)
     imu3 = sensor3.get_any_component_of_type(openzen.component_type_imu)
 
-    error, sensor4 = client.obtain_sensor_by_name("Bluetooth", sensor4MacID)
-    if not error == openzen.ZenError.NoError:
-        print ("Error connecting to left shank", sensor4MacID)
-        quit = True
-        sys.exit(1)
+    while True:
+        error, sensor4 = client.obtain_sensor_by_name("Bluetooth", sensor4MacID)
+        print("Trying to connect Left Shank...press E to quit")
+        if keyboard.is_pressed("e"):
+            quit = True
+            sys.exit(1)
+        if not error != openzen.ZenError.NoError:
+            break
+            #print ("Error connecting to left shank", sensor4MacID)
+            #quit = True
+            #sys.exit(1)
     imu4 = sensor4.get_any_component_of_type(openzen.component_type_imu)
     
-    error, sensor5 = client.obtain_sensor_by_name("Bluetooth", sensor5MacID)
-    if not error == openzen.ZenError.NoError:
-        print ("Error connecting to hip", sensor5MacID)
-        quit = True
-        sys.exit(1)
+    while True:
+        error, sensor5 = client.obtain_sensor_by_name("Bluetooth", sensor5MacID)
+        print("Trying to connect Hip...press E to quit")
+        if keyboard.is_pressed("e"):
+            quit = True
+            sys.exit(1)
+        if not error != openzen.ZenError.NoError:
+            #print ("Error connecting to hip", sensor5MacID)
+            #quit = True
+            #sys.exit(1)
+            break
     imu5 = sensor5.get_any_component_of_type(openzen.component_type_imu)
 
     print ("Sensors Connected")
@@ -207,7 +242,7 @@ def data_acquisition(client, imu1, imu2, imu3, imu4, imu5):
             zenEvent.component.handle == imu1.component.handle:
 
             imu_data = zenEvent.data.imu_data
-            data = copy.copy(imu_data.r[0])
+            data = copy.copy(imu_data.r[0])    # .r[0] -x, .r[2] - z
             IMU_1 = data
             rt = data
             ts = copy.copy(imu_data.timestamp)
@@ -309,8 +344,11 @@ def data_acquisition(client, imu1, imu2, imu3, imu4, imu5):
     print("Data data_acquisition thread terminated")
 
 ## Function: calculate FSR period ####################################################
-def Period_FSR(heelR,heelL,toeR,toeL, HPeriod_available_R, HPeriod_available_L,HeelRp, HeelLp,Allexit,TPeriod_available_R, TPeriod_available_L,ToeRp, ToeLp,gaitR, gaitL):
 
+## Function: calculate FSR period ####################################################
+
+def Period_FSR(heelR,heelL,toeR,toeL, HPeriod_available_R, HPeriod_available_L,HeelRp, HeelLp,Allexit,TPeriod_available_R, TPeriod_available_L,ToeRp, ToeLp,gaitR, gaitL):
+    
      # Right heel
      heelcountR = 0         # Right heel strike count
      heelcountR_flag = 0    # Flag to enable state change
@@ -318,8 +356,12 @@ def Period_FSR(heelR,heelL,toeR,toeL, HPeriod_available_R, HPeriod_available_L,H
      Previous_heelcountTime_R = 0   
      timeHeelR = 0          # period between strike
      timeHeelR_avg = 0      # average of period between last three strikes
+     heel_periods_R = deque(maxlen=3) # list for last three periods - Right heel
+    
      # Left heel
      heelcountL, heelcountL_flag, heelcountTime_L, Previous_heelcountTime_L, timeHeelL, timeHeelL_avg = 0,0,0,0,0,0
+     heel_periods_L = deque(maxlen=3) # list for last three periods - Left heel
+
      # Right toe
      toecountR, toecountTime_R, Previous_toecountTime_R, timetoeR, timetoeR_avg, forToeR = 0,0,0,0,0,0 
      toecountR_flag = 1   
@@ -333,24 +375,35 @@ def Period_FSR(heelR,heelL,toeR,toeL, HPeriod_available_R, HPeriod_available_L,H
         ## Right heel strike #########################################################
          HeelStateR = copy.copy(heelR.value)
         # print("1", flush=True)   
+        # HeelStateR indicates heel is touched
          if HeelStateR == 1 and heelcountR_flag == 0:
              heelcountR_flag = 1
-             heelcountTime_R = perf_counter()
+             heelcountTime_R = perf_counter() # stores the exact time of heel strike
              if heelcountR == 0:
-                  gaitR.value = heelcountTime_R
+                  gaitR.value = heelcountTime_R # gaitR is global variable for the exact time of heel strike
              forToeR = copy.copy(heelcountTime_R) # to use in the toe off time calculation
-             heelcountR = heelcountR +1  
+             heelcountR = heelcountR +1  # increase counter by 1
             # Prev_heelcountTime_R = perf_counter()
              #print("here")   
              if heelcountR> 1:
-                  time_bet_heel_R = heelcountTime_R - Previous_heelcountTime_R 
-                  timeHeelR = timeHeelR + time_bet_heel_R 
-             if heelcountR == 3:
-                 timeHeelR_avg = timeHeelR/3 
-                 timeHeelR = 0
-                 heelcountR = 0 
-                 gaitR.value =  perf_counter()
+                  time_bet_heel_R = heelcountTime_R - Previous_heelcountTime_R # time between two consecutive heel strikes
+                  #timeHeelR = timeHeelR + time_bet_heel_R # running sum of intervals
+                  heel_periods_R.append(time_bet_heel_R) # add to the list, autmoatically removes the oldest entry if more than 3
+            #### OLD METHOD ####
+            #  if heelcountR == 3:
+            #      timeHeelR_avg = timeHeelR/3 
+            #      timeHeelR = 0
+            #      heelcountR = 0 
+            #      gaitR.value =  perf_counter()
+            #  Previous_heelcountTime_R = heelcountTime_R
+
+              ### NEW METHOD --- START ###
+             if len(heel_periods_R) == 3: # when the length of the list reaches 3, start calculating average
+                    timeHeelR_avg = sum(heel_periods_R) / 3
+                    gaitR.value =  perf_counter()
              Previous_heelcountTime_R = heelcountTime_R
+               ### NEW METHOD --- END ###
+
          if HeelStateR == 0 and heelcountR_flag == 1:
               heelcountR_flag = 0
               # timeHeel is actually the gait period
@@ -373,12 +426,19 @@ def Period_FSR(heelR,heelL,toeR,toeL, HPeriod_available_R, HPeriod_available_L,H
              #print("here")   
              if heelcountL> 1:
                   time_bet_heel_L = heelcountTime_L - Previous_heelcountTime_L 
-                  timeHeelL = timeHeelL + time_bet_heel_L 
-             if heelcountL == 3:
-                 timeHeelL_avg = timeHeelL/3 
-                 timeHeelL = 0
-                 heelcountL = 0   
+                  #timeHeelL = timeHeelL + time_bet_heel_L 
+                  heel_periods_L.append(time_bet_heel_L) # add to the list, autmoatically removes the oldest entry if more than 3
+             #if heelcountL == 3:
+              #   timeHeelL_avg = timeHeelL/3 
+               #  timeHeelL = 0
+                # heelcountL = 0   
+             #Previous_heelcountTime_L = heelcountTime_L
+             ### NEW METHOD --- START ###
+             if len(heel_periods_L) == 3: # when the length of the list reaches 3, start calculating average
+                    timeHeelL_avg = sum(heel_periods_L) / 3
+                    gaitL.value =  perf_counter()
              Previous_heelcountTime_L = heelcountTime_L
+               ### NEW METHOD --- END ###
          if HeelStateL == 0 and heelcountL_flag == 1:
               heelcountL_flag = 0
               
@@ -446,12 +506,12 @@ def Period_FSR(heelR,heelL,toeR,toeL, HPeriod_available_R, HPeriod_available_L,H
               TPeriod_available_L.value = 1
               ToeLp.value = copy.copy(timetoeL_avg)
               timetoeL_avg = 0              
+         print(' {:.3f},     {:.3f}'.format(float(HeelRp.value),  float(HeelLp.value)), end ='\r' ) 
               
      except Exception as e:
             import traceback
             print("FSR crashed", e , flush=True )
-            traceback.print_exc()                  
-
+            traceback.print_exc()
 ## Function: calculates Actuation time based on Period #######################################
 def Timesforwalk(HPeriod_available_R, HPeriod_available_L,HeelRp, HeelLp,Allexit,TPeriod_available_R, TPeriod_available_L,ToeRp, ToeLp,gaitR, gaitL, Rallow, Lallow, supportTimeR, unsupportTimeR, supportTimeL, unsupportTimeL, supportTimeRAn, unsupportTimeRAn, supportTimeLAn,unsupportTimeLAn):
           rhflaglocal, rtflaglocal, sr = 0, 0, 0
@@ -653,7 +713,7 @@ def Walk(heelR,heelL,toeR,toeL,Allexit, Rallow, Lallow, supportTimeR, unsupportT
     apply_pressure(0,0,0,0,0)
     """
 ## Function: start recording DAQ ###################################################
-def record_daq(Allexit, record_start_fd, c_time, LogFile, Lr, Ll, psRu, psRd, psLu,psLd, FSRrh, FSRrt, FSRlh, FSRlt, switch ):      # varaibles need to change
+def record_daq(Allexit, record_start_fd, c_time, LogFile, Lr, Ll, psRu, psRd, psLu,psLd, FSRrh, FSRrt, FSRlh, FSRlt, switch, heelR,heelL,HeelRp, HeelLp,toeR,toeL, supportTimeR, unsupportTimeR, supportTimeL, unsupportTimeL):      # varaibles need to change
     
     ## Convert funtion: Pressure sensors ###########################################
     def Volt_to_kPa(v):
@@ -684,7 +744,7 @@ def record_daq(Allexit, record_start_fd, c_time, LogFile, Lr, Ll, psRu, psRd, ps
     # Start DAQ
     taskAI.start()   
     fa=open(LogFile,'w')
-    data = ["Time"]  + ["R Loadcell"] + ["L Loadcell"]  + ["Pressure R BAM UP"] + ["Pressure R BAM Down"] + ["Pressure L BAM UP"] + ["Pressure L BAM Down"] + ["FSR R Heel"] + ["FSR R Toe"] + ["FSR L Heel"] + ["FSR L Toe"]
+    data = ["Time"]  + ["R Loadcell"] + ["L Loadcell"]  + ["Pressure R BAM UP"] + ["Pressure R BAM Down"] + ["Pressure L BAM UP"] + ["Pressure L BAM Down"] + ["FSR R Heel"] + ["FSR R Toe"] + ["FSR L Heel"] + ["FSR L Toe"] + ["heelR"] + ["heelL"] +["HeelRp"] + ["HeelLp"] +["toeR"]+["toeL"]+ ["supportTimeR"] + ["unsupportTimeR"]+ ["supportTimeL"]+ ["unsupportTimeL"]
             
     for ele in data:
         fa.write(str(ele)+',')
@@ -713,7 +773,7 @@ def record_daq(Allexit, record_start_fd, c_time, LogFile, Lr, Ll, psRu, psRd, ps
         if record_start_fd.value == 1:                      
             if perf_counter() - record_interval > 0.009:        
                 # print("here")
-                dataA = [perf_counter() - c_time.value] +  [Lr.value] +  [Ll.value]  + [psRu.value] + [psRd.value] + [psLu.value] + [psLd.value] + [FSRrh.value] + [FSRrt.value] + [FSRlh.value] + [FSRlt.value]
+                dataA = [perf_counter() - c_time.value] +  [Lr.value] +  [Ll.value]  + [psRu.value] + [psRd.value] + [psLu.value] + [psLd.value] + [FSRrh.value] + [FSRrt.value] + [FSRlh.value] + [FSRlt.value]  + [heelR.value] + [heelL.value] +[HeelRp.value] + [HeelLp.value] +[toeR.value]+[toeL.value]+ [supportTimeR.value] + [unsupportTimeR.value]+ [supportTimeL.value]+ [unsupportTimeL.value]
                 for ele in dataA:
                     fa.write(str(ele)+',')
                 fa.write('\n')
@@ -879,8 +939,8 @@ class AdaptiveFSR:
 ## MAIN: Run the script #####################################################
 if __name__ == "__main__":
     # mp. = multiple processinge
-    
-    imu_on = 0
+    ENABLE_LIVEPLOT = 1  # 0 will not plot live
+    imu_on = 1              # 1 means IMU will be attempted to connect, 0 otherwise
     switch = mp.Value('i', 0)    # 0 ----FSR, else Pressure Sensor
     heelR = mp.Value('i', 0) # right heel strike (HS) live state
     heelL = mp.Value('i', 0)
@@ -926,6 +986,12 @@ if __name__ == "__main__":
     psLu = mp.Value('d', 0)
     psLd = mp.Value('d', 0)
     
+    IMU_11 = mp.Value('d', 0)     # Pressure reading 1 
+    IMU_22 = mp.Value('d', 0)     # Pressure reading 2
+    IMU_33 = mp.Value('d', 0)
+    IMU_44 = mp.Value('d', 0)
+    IMU_55 = mp.Value('d', 0)
+
     FSRrh = mp.Value('d', 0)    # FSR reading right heel (raw data)
     FSRrt = mp.Value('d', 0)
     FSRlh = mp.Value('d', 0)
@@ -935,8 +1001,13 @@ if __name__ == "__main__":
     timestrt = time.strftime("%Y%m%d-%H%M%S")
     LogFile = "All"+"_"+"Data"+"_"+timestrt+".csv"
 
+
+
+
+
+
 ## Execute Multiple Process ############################################################
-    Daq = mp.Process(target=record_daq, args=(Allexit, record_start_fd, c_time, LogFile, Lr, Ll, psRu, psRd, psLu,psLd, FSRrh, FSRrt, FSRlh, FSRlt,switch ))
+    Daq = mp.Process(target=record_daq, args=(Allexit, record_start_fd, c_time, LogFile, Lr, Ll, psRu, psRd, psLu,psLd, FSRrh, FSRrt, FSRlh, FSRlt,switch,heelR,heelL, HeelRp, HeelLp,toeR,toeL, supportTimeR, unsupportTimeR, supportTimeL, unsupportTimeL ))
     # record_daq = function to record daq while updating variables
     # args = variables
     if switch.value != 0:
@@ -978,11 +1049,7 @@ if __name__ == "__main__":
          print("Foot Pressure Reading active:", Foot_pressure.pid, "alive:", Foot_pressure.is_alive(), flush=True )
 
     # Library for IMUs
-    openzen.set_log_level(openzen.ZenLogLevel.Warning)
-
-    #global Analogs
-    #Analogs = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ]
-
+    
     global quit
     global record_interval
 
@@ -1004,28 +1071,11 @@ if __name__ == "__main__":
 
     global s1, s2, s3, s4, s5, t1now, t2now, t3now, t4now, t5now
     s1, s2, s3, s4, s5 = 1,1,1,1,1
-    # s1 = 1
-    # s2 = 1
-    # s3 = 1
-    # s4 = 1
-    # s5 = 1
     t1now, t2now, t3now, t4now, t5now = 0,0,0,0,0
-    # t1now = 0
-    # t2now = 0
-    # t3now = 0
-    # t4now = 0
-    # t5now = 0
+
 
     global rt, rs, lt, ls, hip
     rt, rs, lt, ls, hip = 90,90,90,90,90
-    # rt = 90
-    # rs = 90
-    # lt = 90
-    # ls = 90
-    # hip = 90
-
-    #MAX_SAMPLES = 500  # Number of samples to plot
-    # data array for plotting
     imu1_dt   = []
     imu1_data = []
     imu2_dt   = []
@@ -1045,8 +1095,28 @@ if __name__ == "__main__":
     det_rt = AdaptiveFSR()  # Right Toe
     det_lh = AdaptiveFSR()  # Left Heel
     det_lt = AdaptiveFSR()  # Left Toe
+    
+    shared = {
+    "Lr": Lr, "Ll": Ll,
+    "R": R, "L": L, "RR": RR, "LL": LL,
+    "psRu": psRu, "psRd": psRd, "psLu": psLu, "psLd": psLd,
+    "FSRrh": FSRrh, "FSRrt": FSRrt, "FSRlh": FSRlh, "FSRlt": FSRlt,
+    "heelR": heelR, "heelL": heelL, "toeR": toeR, "toeL": toeL,
+    "HeelRp": HeelRp, "HeelLp": HeelLp,
+    "supportTimeR": supportTimeR, "unsupportTimeR": unsupportTimeR,
+    "supportTimeL": supportTimeL, "unsupportTimeL": unsupportTimeL,
+    "IMU_11": IMU_11, "IMU_22": IMU_22, "IMU_33": IMU_33, "IMU_44": IMU_44, "IMU_55": IMU_55
+    }
+
+    if ENABLE_LIVEPLOT:
+        from liveplot import live_plot
+        plotter = mp.Process(target=live_plot, args=(shared, Allexit))
+        plotter.start()
                 
     # try = connect to all IMUs
+    openzen.set_log_level(openzen.ZenLogLevel.Warning)
+
+
     try:      
         if (imu_on):
           (client, sensor1, imu1, sensor2, imu2, sensor3, imu3, sensor4, imu4, sensor5, imu5) = connectSensors()
@@ -1067,6 +1137,17 @@ if __name__ == "__main__":
         # Process the whole program
         while True:
             # for recording ########################################################################################
+            
+            IMU_11.value = IMU_1     # Pressure reading 1 
+            IMU_22.value = IMU_2     # Pressure reading 2
+            IMU_33.value = IMU_3
+            IMU_44.value = IMU_4
+            IMU_55.value = IMU_5
+
+            # IMU functions for detecting turning... can be placed here
+
+
+
             if keyboard.is_pressed('r'):                
                 r_pressed.value = 1
                 if firsttime == 1:
@@ -1099,83 +1180,11 @@ if __name__ == "__main__":
                 state_LT, _,  _,  _  = det_lt.update(FSRlt.value)  # Left to
                 toeL.value = 1- state_LT
                 
-                
-                """
-                if FSRrh.value> 1.5: #2.4:     #2.5
-                    heelR.value = 0
-                else: #1.9:   # 2
-                    heelR.value = 1
-                
-                if FSRlh.value > 1: #2.4: #2.2
-                    heelL.value = 0
-                else: #1.9:  
-                    heelL.value = 1
-
-                if FSRlt.value> 2:    #3
-                    toeL.value = 0
-                else: #1.5
-                    toeL.value = 1
-
-                # to change to this one
-                toeR.value = 0 if FSRrt.value > 1.5 else 1
-            
-                """
-
-                
-               # toeL.value,  *_ = det_lt.update(FSRlt.value, now)
-               # print (det_rh)
-                
-              #  heelR.value, *_ = hR[0]
-               #e toeR.value,  *_ = tR[0]
-                #heelL.value, *_ = det_lh.update(FSRlh.value, now)
-                #toeL.value,  *_ = det_lt.update(FSRlt.value, now)
-                
-
-            
-            
-            ########### Foot Pressure
-            else:
-                if FSRrh.value> 800: #2.4:     #2.5
-                    heelR.value = 0
-                else: #1.9:   # 2
-                    heelR.value = 1
-                
-                if FSRlh.value > 900: #2.4: #2.2
-                    heelL.value = 0
-                else: #1.9:  
-                    heelL.value = 1
-
-                if FSRlt.value> 800:    #3
-                    toeL.value = 0
-                else: #1.5
-                    toeL.value = 1
-
-                toeR.value = 0 if FSRrt.value > 700 else 1
-            
-        # r = 0
-                #valuex = copy.copy(Analogs)
-                #print(buffer_in)   
-                #break            
-            #print("FSR PID:", FSR.pid, "alive:", FSR.is_alive(), flush=True )
-    
+           
            # print('     {:d},        {:d},       {:d},       {:d},      {:.3f},     {:.3f},    {:.3f},    {:.3f}, {:.3f}'.format(int(heelR.value),  int(toeR.value), int(heelL.value),  int(toeL.value),float(IMU_1),  float(IMU_2), float(IMU_3),  float(IMU_4), float(IMU_5)), end ='\r' ) 
-            print('     {:f},        {:f},       {:f},       {:f},      {:.3f},     {:.3f},    {:.3f},    {:.3f}, {:.3f}'.format((FSRrh.value),  (FSRrt.value), (FSRlh.value),  (FSRlt.value),float(IMU_1),  float(IMU_2), float(IMU_3),  float(IMU_4), float(IMU_5)), end ='\r' ) 
+          #  print('     {:f},        {:f},       {:f},       {:f},      {:.3f},     {:.3f},    {:.3f},    {:.3f}, {:.3f}'.format((FSRrh.value),  (FSRrt.value), (FSRlh.value),  (FSRlt.value),float(IMU_1),  float(IMU_2), float(IMU_3),  float(IMU_4), float(IMU_5)), end ='\r' ) 
           #  print('     {:d},        {:d},       {:d},       {:d},      {:.3f},     {:.3f},    {:.3f},    {:.3f}, {:.3f}'.format(int(heelR.value),  int(toeR.value), int(heelL.value),  int(toeL.value),float(IMU_1),  float(IMU_2), float(IMU_3),  float(IMU_4), float(IMU_5)), end ='\r' ) 
             
-            # print('{:.3f},{:.3f},{:.3f},{:.3f},{:.3f}'.format(float(IMU_1),  float(IMU_2), float(IMU_3),  float(IMU_4), float(IMU_5)), end = '\r' )    
-            ### if you comment the above printing, you might need have a slight delay
-           # time.sleep(0.0001)
-           # print(perf_counter() - c_time)
-            
-            #if record_start == 1:                           
-                    #if perf_counter() - record_interval > 0.009:        
-                          #  dataA = [perf_counter() - c_time] +  [Lr] +  [Ll]  + [psRu] + [psRd] + [psLu] + [psLd] + [FSRrh] + [FSRrt] + [FSRlh] + [FSRlt]
-                          #  for ele in dataA:
-                          #          fa.write(str(ele)+',')
-                          #  fa.write('\n')
-                          #  record_interval = perf_counter()
-
-            ## For quit the recording ###################################################################
             if keyboard.is_pressed('q') and r_pressed.value==1:
                         #taskAI.stop()
                         record_start  = 0
@@ -1184,9 +1193,7 @@ if __name__ == "__main__":
                 
                         s1, s2, s3, s4, s5 = 1,1,1,1,1
 
-                        #time.sleep(1)
-                    # Analogs = taskAI.read()
-                    # if r_pressed == 1:
+               
                         print("\n Recording stopped")
                         r_pressed.value = 0
                                 
@@ -1215,19 +1222,6 @@ if __name__ == "__main__":
             data_thread.join()
             print ("\nStreaming of sensor data complete")
             client.close()    
-
-        # task_in.close()
-    # fa.close()
-    # sensor1.release()
-    # sensor2.release()
-    #  sensor3.release()
-    #  sensor4.release()
-    # sensor5.release()
-    
-        #client.close()
-        #  print("OpenZen client closed. Bye")
-
-       # fa.close()
         f1.close()
         f2.close()
         f3.close()
@@ -1239,6 +1233,8 @@ if __name__ == "__main__":
         T_to_walk.join()
         Walk_start.join()
         Daq.join()
+        if ENABLE_LIVEPLOT:
+            plotter.join()
         
         if switch.value != 0:
              Foot_pressure.join()
