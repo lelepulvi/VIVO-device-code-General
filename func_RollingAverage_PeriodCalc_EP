@@ -10,9 +10,12 @@ def Period_FSR(heelR,heelL,toeR,toeL, HPeriod_available_R, HPeriod_available_L,H
      Previous_heelcountTime_R = 0   
      timeHeelR = 0          # period between strike
      timeHeelR_avg = 0      # average of period between last three strikes
-     heel_periods_R = deque(maxlen=3) # list for last three periods
+     heel_periods_R = deque(maxlen=3) # list for last three periods - Right heel
+    
      # Left heel
      heelcountL, heelcountL_flag, heelcountTime_L, Previous_heelcountTime_L, timeHeelL, timeHeelL_avg = 0,0,0,0,0,0
+     heel_periods_L = deque(maxlen=3) # list for last three periods - Left heel
+
      # Right toe
      toecountR, toecountTime_R, Previous_toecountTime_R, timetoeR, timetoeR_avg, forToeR = 0,0,0,0,0,0 
      toecountR_flag = 1   
@@ -77,12 +80,19 @@ def Period_FSR(heelR,heelL,toeR,toeL, HPeriod_available_R, HPeriod_available_L,H
              #print("here")   
              if heelcountL> 1:
                   time_bet_heel_L = heelcountTime_L - Previous_heelcountTime_L 
-                  timeHeelL = timeHeelL + time_bet_heel_L 
-             if heelcountL == 3:
-                 timeHeelL_avg = timeHeelL/3 
-                 timeHeelL = 0
-                 heelcountL = 0   
+                  #timeHeelL = timeHeelL + time_bet_heel_L 
+                  heel_periods_L.append(time_bet_heel_l) # add to the list, autmoatically removes the oldest entry if more than 3
+             #if heelcountL == 3:
+              #   timeHeelL_avg = timeHeelL/3 
+               #  timeHeelL = 0
+                # heelcountL = 0   
+             #Previous_heelcountTime_L = heelcountTime_L
+             ### NEW METHOD --- START ###
+             if len(heel_periods_L) == 3: # when the length of the list reaches 3, start calculating average
+                    timeHeelL_avg = sum(heel_periods_L) / 3
+                    gaitL.value =  perf_counter()
              Previous_heelcountTime_L = heelcountTime_L
+               ### NEW METHOD --- END ###
          if HeelStateL == 0 and heelcountL_flag == 1:
               heelcountL_flag = 0
               
