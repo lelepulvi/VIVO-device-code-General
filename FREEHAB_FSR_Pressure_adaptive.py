@@ -221,7 +221,7 @@ def connectSensors():
     return (client, sensor1, imu1, sensor2, imu2, sensor3, imu3, sensor4, imu4, sensor5, imu5)
 
 ## Function: acquire IMUs (from Supplier's library) #####################################################
-def data_acquisition(client, imu1, imu2, imu3, imu4, imu5):
+def data_acquisition(client, imu1, imu2, imu3, imu4, imu5, IMU_11,IMU_22,IMU_33, IMU_44, IMU_55, IMU_1z, IMU_2z,IMU_3z,IMU_4z,IMU_5z):
     global imu1_data, imu1_dt, imu2_data, imu2_dt,imu3_data, imu3_dt,imu4_data, imu4_dt,imu5_data, imu5_dt, quit, f1,f2, f3, f4, f5
     
     global rt, rs, lt, ls, hip
@@ -244,6 +244,8 @@ def data_acquisition(client, imu1, imu2, imu3, imu4, imu5):
             imu_data = zenEvent.data.imu_data
             data = copy.copy(imu_data.r[0])    # .r[0] -x, .r[2] - z
             IMU_1 = data
+            IMU_11.value = data
+            IMU_1z.value = copy.copy(imu_data.r[2])
             rt = data
             ts = copy.copy(imu_data.timestamp)
             if (s1 ==1 and record_start==1):
@@ -266,6 +268,8 @@ def data_acquisition(client, imu1, imu2, imu3, imu4, imu5):
             imu_data = zenEvent.data.imu_data
             data = copy.copy(imu_data.r[0])
             IMU_2 = data
+            IMU_22.value = data
+            IMU_2z.value = copy.copy(imu_data.r[2])            
             rs = data
             ts = copy.copy(imu_data.timestamp)
             if (s2 ==1 and record_start==1):
@@ -287,6 +291,8 @@ def data_acquisition(client, imu1, imu2, imu3, imu4, imu5):
             data = copy.copy(imu_data.r[0])
             IMU_3 = data
             lt = data
+            IMU_33.value = data
+            IMU_3z.value = copy.copy(imu_data.r[2])            
             ts = copy.copy(imu_data.timestamp)
             if (s3 ==1 and record_start==1):
                   s3 = 0
@@ -307,6 +313,8 @@ def data_acquisition(client, imu1, imu2, imu3, imu4, imu5):
             data = copy.copy(imu_data.r[0])
             IMU_4 = data
             ls = data
+            IMU_44.value = data
+            IMU_4z.value = copy.copy(imu_data.r[2])            
             ts = copy.copy(imu_data.timestamp)
             if (s4 ==1 and record_start==1):
                   s4 = 0
@@ -327,6 +335,8 @@ def data_acquisition(client, imu1, imu2, imu3, imu4, imu5):
             data = copy.copy(imu_data.r[0])
             IMU_5 = data
             hip = data
+            IMU_55.value = data
+            IMU_5z.value = copy.copy(imu_data.r[2])            
             ts = copy.copy(imu_data.timestamp)
             if (s5 ==1 and record_start==1):
                   s5 = 0
@@ -506,7 +516,7 @@ def Period_FSR(heelR,heelL,toeR,toeL, HPeriod_available_R, HPeriod_available_L,H
               TPeriod_available_L.value = 1
               ToeLp.value = copy.copy(timetoeL_avg)
               timetoeL_avg = 0              
-         print(' {:.3f},     {:.3f}'.format(float(HeelRp.value),  float(HeelLp.value)), end ='\r' ) 
+       #  print(' {:.3f},     {:.3f}'.format(float(HeelRp.value),  float(HeelLp.value)), end ='\r' ) 
               
      except Exception as e:
             import traceback
@@ -986,11 +996,18 @@ if __name__ == "__main__":
     psLu = mp.Value('d', 0)
     psLd = mp.Value('d', 0)
     
-    IMU_11 = mp.Value('d', 0)     # Pressure reading 1 
-    IMU_22 = mp.Value('d', 0)     # Pressure reading 2
+    IMU_11 = mp.Value('d', 0)      # x
+    IMU_22 = mp.Value('d', 0)     
     IMU_33 = mp.Value('d', 0)
     IMU_44 = mp.Value('d', 0)
     IMU_55 = mp.Value('d', 0)
+
+    IMU_1z = mp.Value('d', 0)     # z 
+    IMU_2z = mp.Value('d', 0)     
+    IMU_3z = mp.Value('d', 0)
+    IMU_4z = mp.Value('d', 0)
+    IMU_5z = mp.Value('d', 0)
+
 
     FSRrh = mp.Value('d', 0)    # FSR reading right heel (raw data)
     FSRrt = mp.Value('d', 0)
@@ -1123,7 +1140,7 @@ if __name__ == "__main__":
           quit = False
 
         # If the connecton completes, ...
-          data_thread = threading.Thread(target=data_acquisition, args=(client, imu1, imu2, imu3, imu4, imu5))
+          data_thread = threading.Thread(target=data_acquisition, args=(client, imu1, imu2, imu3, imu4, imu5, IMU_11,IMU_22,IMU_33, IMU_44, IMU_55, IMU_1z, IMU_2z,IMU_3z,IMU_4z,IMU_5z))
           data_thread.start()
         file_record()       # only create new files if connections are successful
         c_time.value = 0 # current time
@@ -1138,12 +1155,7 @@ if __name__ == "__main__":
         while True:
             # for recording ########################################################################################
             
-            IMU_11.value = IMU_1     # Pressure reading 1 
-            IMU_22.value = IMU_2     # Pressure reading 2
-            IMU_33.value = IMU_3
-            IMU_44.value = IMU_4
-            IMU_55.value = IMU_5
-
+     
             # IMU functions for detecting turning... can be placed here
 
 
@@ -1184,6 +1196,7 @@ if __name__ == "__main__":
            # print('     {:d},        {:d},       {:d},       {:d},      {:.3f},     {:.3f},    {:.3f},    {:.3f}, {:.3f}'.format(int(heelR.value),  int(toeR.value), int(heelL.value),  int(toeL.value),float(IMU_1),  float(IMU_2), float(IMU_3),  float(IMU_4), float(IMU_5)), end ='\r' ) 
           #  print('     {:f},        {:f},       {:f},       {:f},      {:.3f},     {:.3f},    {:.3f},    {:.3f}, {:.3f}'.format((FSRrh.value),  (FSRrt.value), (FSRlh.value),  (FSRlt.value),float(IMU_1),  float(IMU_2), float(IMU_3),  float(IMU_4), float(IMU_5)), end ='\r' ) 
           #  print('     {:d},        {:d},       {:d},       {:d},      {:.3f},     {:.3f},    {:.3f},    {:.3f}, {:.3f}'.format(int(heelR.value),  int(toeR.value), int(heelL.value),  int(toeL.value),float(IMU_1),  float(IMU_2), float(IMU_3),  float(IMU_4), float(IMU_5)), end ='\r' ) 
+            print('     {:d},        {:d},       {:d},       {:d},      {:.3f},     {:.3f},    {:.3f},    {:.3f}, {:.3f}'.format(int(heelR.value),  int(toeR.value), int(heelL.value),  int(toeL.value),float(IMU_1z.value),  float(IMU_2z.value), float(IMU_3z.value),  float(IMU_4z.value), float(IMU_5z.value)), end ='\r' ) 
             
             if keyboard.is_pressed('q') and r_pressed.value==1:
                         #taskAI.stop()
