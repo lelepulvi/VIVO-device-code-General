@@ -638,11 +638,128 @@ def Walk(heelR,heelL,toeR,toeL,Allexit, Rallow, Lallow, supportTimeR, unsupportT
 
         # 5) Return updated last_heel and gaittime (so caller saves them)
         return heel_value, gaittime
-    
+
+    def make_turn_detector(
+        window_s=2.0,         # how long we accumulate heading (seconds)
+        theta_on_deg=110.0,   # enter turning if heading span >= this
+        theta_off_deg=50.0,   # exit turning if heading span <= this
+        omega_on_dps=30.0,    # enter turning if |yaw-rate| >= this
+        omega_off_dps=15.0,   # exit turning if |yaw-rate| <= this
+        min_enter_ms=200,     # must satisfy "enter" for at least this long
+        min_exit_ms=400,      # must satisfy "exit" for at least this long
+        ema_alpha=0.25,       # smoothing for yaw-rate estimate
+        degrees=True          # True if IMU_5z already gives degrees
+    ):
+        buf = deque()               # (t, unwrapped_yaw)
+        state = 0                   # 0 = straight, 1 = turning
+        last_yaw_raw = None         # last raw yaw reading (wrapped)
+        yaw_unwrapped = None        # running unwrapped yaw
+        yaw_rate_ema = 0.0          # smoothed yaw-rate
+        last_t = None
+        enter_t = None              # first time we met enter condition
+        exit_t = None               # first time we met exit condition
+        enter_heading = None        # heading when entering turn (for ~180° completion)
+        min_enter = min_enter_ms / 1000.0
+        min_exit  = min_exit_ms  / 1000.0
+        
+        # Shortest signed angle diff in degrees (handles wrap at ±180°, returns in [-180, 180])
+        def unwrap(prev, curr):
+            """Unwrap 'curr' around 'prev' so diffs live in [-180, 180]."""
+            dy = curr - prev
+            while dy > 180.0:  dy -= 360.0
+            while dy < -180.0: dy += 360.0
+            return dy
+
+        def update(yaw_val, t=None, yaw_rate_dps=None):
+            """
+            Call this each loop with current hip yaw angle (IMU_5z).
+
+            Args:
+                yaw_val: hip yaw angle (degrees if degrees=True; else radians)
+                t: optional timestamp (seconds). If None uses perf_counter()
+                yaw_rate_dps: optional externally computed yaw-rate (deg/s).
+                            If None, we estimate it from diffs and smooth.
+
+            Returns:
+                state: 0 (straight) or 1 (turning)
+                info:  dict with debugging info: {'t', 'yaw_span_deg', 'yaw_rate_dps'}
+            """
+            nonlocal state, last_yaw_raw, yaw_unwrapped, yaw_rate_ema
+            nonlocal last_t, enter_t, exit_t, enter_heading
+
+            t = time.perf_counter() if t is None else float(t)
+            yaw_deg = math.degrees(yaw_val) if not degrees else float(yaw_val)
+
+            # Bootstrap on first sample
+            if last_yaw_raw is None:
+                last_yaw_raw = yaw_deg
+                yaw_unwrapped = yaw_deg
+                last_t = t
+                buf.clear()
+                buf.append((t, yaw_unwrapped))
+                return state, {"t": t, "yaw_span_deg": 0.0, "yaw_rate_dps": 0.0}
+
+            # Unwrap and update unwrapped heading
+            dy = unwrap(last_yaw_raw, yaw_deg)
+            last_yaw_raw = yaw_deg
+            yaw_unwrapped += dy
+
+            # dt and yaw-rate (smoothed if not provided)
+            dt = max(1e-6, t - last_t) # elapsed time since last sample
+            last_t = t # update timestamp
+            if yaw_rate_dps is None:
+                inst_rate = dy / dt
+                yaw_rate_ema = (1 - ema_alpha) * yaw_rate_ema + ema_alpha * inst_rate # exponential moving average (EMA) to smooth the rate
+                yaw_rate = yaw_rate_ema
+            else:
+                yaw_rate = float(yaw_rate_dps) # only if yaw rate is provided
+
+            # Maintain sliding time window and compute span
+            buf.append((t, yaw_unwrapped)) # push current (time, unwrapped yaw) sample
+            tmin = t - window_s # lower bound of the sliding window (seconds ago)
+            while buf and buf[0][0] < tmin:
+                buf.popleft() # drop samples older than the window
+            yaw_span = abs(buf[-1][1] - buf[0][1]) if len(buf) >= 2 else 0.0   # total yaw change across the current window (deg)
+
+            # State machine with hysteresis + min-time constraints
+            if state == 0: # NOT turning
+                # Enter turning only if both span and rate are high enough
+                if yaw_span >= theta_on_deg and abs(yaw_rate) >= omega_on_dps:
+                    if enter_t is None:
+                        enter_t = t
+                        enter_heading = buf[-1][1]
+                    elif (t - enter_t) >= min_enter:
+                        state = 1 # confirm: now TURNING
+                        enter_t = None # clear placeholders
+                        exit_t = None
+            else: # 1 = TURNING
+                # Exit turning if:
+                #  A) rotation since entering is big enough (~160°) AND rate slowed
+                #  OR
+                #  B) current window's span is small AND rate slowed
+                completed = (enter_heading is not None and
+                            abs(buf[-1][1] - enter_heading) >= 160.0)
+                slow      = abs(yaw_rate) <= omega_off_dps
+                smallspan = yaw_span <= theta_off_deg
+                if (completed and slow) or (smallspan and slow):
+                    if exit_t is None:
+                        exit_t = t
+                    elif (t - exit_t) >= min_exit:
+                        state = 0 # confirm: back to NOT TURNING
+                        exit_t = None
+                        enter_heading = None
+
+            return state, {"t": t, "yaw_span_deg": yaw_span, "yaw_rate_dps": yaw_rate}
+
+        return update
+    # --------------------------------------------------------------
+
+
     # ---------------- TURNING STATE (create detector once) ----------------
     # Use hip yaw (IMU_5z). Assuming your imu_data.r[2] is yaw in degrees
     # (you already print IMU_5z as a degree-like angle). If it's radians,
     # change degrees=False in make_turn_detector below.
+
     turn_update = make_turn_detector(
         window_s=3.0,
         theta_on_deg=120.0,
@@ -988,121 +1105,6 @@ class AdaptiveFSR:
 # It un-wraps heading to avoid 360° jumps, keeps a short window,
 # and uses hysteresis + min time to avoid chattering.
 
-def make_turn_detector(
-    window_s=2.0,         # how long we accumulate heading (seconds)
-    theta_on_deg=110.0,   # enter turning if heading span >= this
-    theta_off_deg=50.0,   # exit turning if heading span <= this
-    omega_on_dps=30.0,    # enter turning if |yaw-rate| >= this
-    omega_off_dps=15.0,   # exit turning if |yaw-rate| <= this
-    min_enter_ms=200,     # must satisfy "enter" for at least this long
-    min_exit_ms=400,      # must satisfy "exit" for at least this long
-    ema_alpha=0.25,       # smoothing for yaw-rate estimate
-    degrees=True          # True if IMU_5z already gives degrees
-):
-    buf = deque()               # (t, unwrapped_yaw)
-    state = 0                   # 0 = straight, 1 = turning
-    last_yaw_raw = None         # last raw yaw reading (wrapped)
-    yaw_unwrapped = None        # running unwrapped yaw
-    yaw_rate_ema = 0.0          # smoothed yaw-rate
-    last_t = None
-    enter_t = None              # first time we met enter condition
-    exit_t = None               # first time we met exit condition
-    enter_heading = None        # heading when entering turn (for ~180° completion)
-    min_enter = min_enter_ms / 1000.0
-    min_exit  = min_exit_ms  / 1000.0
-    
-    # Shortest signed angle diff in degrees (handles wrap at ±180°, returns in [-180, 180])
-    def unwrap(prev, curr):
-        """Unwrap 'curr' around 'prev' so diffs live in [-180, 180]."""
-        dy = curr - prev
-        while dy > 180.0:  dy -= 360.0
-        while dy < -180.0: dy += 360.0
-        return dy
-
-    def update(yaw_val, t=None, yaw_rate_dps=None):
-        """
-        Call this each loop with current hip yaw angle (IMU_5z).
-
-        Args:
-            yaw_val: hip yaw angle (degrees if degrees=True; else radians)
-            t: optional timestamp (seconds). If None uses perf_counter()
-            yaw_rate_dps: optional externally computed yaw-rate (deg/s).
-                          If None, we estimate it from diffs and smooth.
-
-        Returns:
-            state: 0 (straight) or 1 (turning)
-            info:  dict with debugging info: {'t', 'yaw_span_deg', 'yaw_rate_dps'}
-        """
-        nonlocal state, last_yaw_raw, yaw_unwrapped, yaw_rate_ema
-        nonlocal last_t, enter_t, exit_t, enter_heading
-
-        t = time.perf_counter() if t is None else float(t)
-        yaw_deg = math.degrees(yaw_val) if not degrees else float(yaw_val)
-
-        # Bootstrap on first sample
-        if last_yaw_raw is None:
-            last_yaw_raw = yaw_deg
-            yaw_unwrapped = yaw_deg
-            last_t = t
-            buf.clear()
-            buf.append((t, yaw_unwrapped))
-            return state, {"t": t, "yaw_span_deg": 0.0, "yaw_rate_dps": 0.0}
-
-        # Unwrap and update unwrapped heading
-        dy = unwrap(last_yaw_raw, yaw_deg)
-        last_yaw_raw = yaw_deg
-        yaw_unwrapped += dy
-
-        # dt and yaw-rate (smoothed if not provided)
-        dt = max(1e-6, t - last_t) # elapsed time since last sample
-        last_t = t # update timestamp
-        if yaw_rate_dps is None:
-            inst_rate = dy / dt
-            yaw_rate_ema = (1 - ema_alpha) * yaw_rate_ema + ema_alpha * inst_rate # exponential moving average (EMA) to smooth the rate
-            yaw_rate = yaw_rate_ema
-        else:
-            yaw_rate = float(yaw_rate_dps) # only if yaw rate is provided
-
-        # Maintain sliding time window and compute span
-        buf.append((t, yaw_unwrapped)) # push current (time, unwrapped yaw) sample
-        tmin = t - window_s # lower bound of the sliding window (seconds ago)
-        while buf and buf[0][0] < tmin:
-            buf.popleft() # drop samples older than the window
-        yaw_span = abs(buf[-1][1] - buf[0][1]) if len(buf) >= 2 else 0.0   # total yaw change across the current window (deg)
-
-        # State machine with hysteresis + min-time constraints
-        if state == 0: # NOT turning
-            # Enter turning only if both span and rate are high enough
-            if yaw_span >= theta_on_deg and abs(yaw_rate) >= omega_on_dps:
-                if enter_t is None:
-                    enter_t = t
-                    enter_heading = buf[-1][1]
-                elif (t - enter_t) >= min_enter:
-                    state = 1 # confirm: now TURNING
-                    enter_t = None # clear placeholders
-                    exit_t = None
-        else: # 1 = TURNING
-            # Exit turning if:
-            #  A) rotation since entering is big enough (~160°) AND rate slowed
-            #  OR
-            #  B) current window's span is small AND rate slowed
-            completed = (enter_heading is not None and
-                         abs(buf[-1][1] - enter_heading) >= 160.0)
-            slow      = abs(yaw_rate) <= omega_off_dps
-            smallspan = yaw_span <= theta_off_deg
-            if (completed and slow) or (smallspan and slow):
-                if exit_t is None:
-                    exit_t = t
-                elif (t - exit_t) >= min_exit:
-                    state = 0 # confirm: back to NOT TURNING
-                    exit_t = None
-                    enter_heading = None
-
-        return state, {"t": t, "yaw_span_deg": yaw_span, "yaw_rate_dps": yaw_rate}
-
-    return update
-# --------------------------------------------------------------
-  
 
 
 ## MAIN: Run the script #####################################################
