@@ -590,7 +590,7 @@ def Timesforwalk(HPeriod_available_R, HPeriod_available_L,HeelRp, HeelLp,Allexit
                             unsupportTimeRAn.value= 0 
             
 ## Function: execute the actuators' actuation ###########################################            
-def Walk(heelR,heelL,toeR,toeL,Allexit, Rallow, Lallow, supportTimeR, unsupportTimeR, supportTimeL, unsupportTimeL, supportTimeRAn, unsupportTimeRAn, supportTimeLAn,unsupportTimeLAn, R, L, RR, LL, Emg_sig, r_pressed):
+def Walk(heelR,heelL,toeR,toeL,Allexit, Rallow, Lallow, supportTimeR, unsupportTimeR, supportTimeL, unsupportTimeL, supportTimeRAn, unsupportTimeRAn, supportTimeLAn,unsupportTimeLAn, R, L, RR, LL, Emg_sig, r_pressed, IMU_5z, Applied_pressure):
     # Setting Arduino (run once)
     arduino = serial.Serial('COM16', 115200, parity=serial.PARITY_NONE,
     stopbits=serial.STOPBITS_ONE,
@@ -609,7 +609,11 @@ def Walk(heelR,heelL,toeR,toeL,Allexit, Rallow, Lallow, supportTimeR, unsupportT
     last_heelL = 0
     gaittimeR = None
     gaittimeL = None
+            
 
+   
+ 
+    
 # --- process_leg updates actuator1.value and actuator2.value (side-effect) ---
     def process_leg(heel_value, last_heel, gaittime, supportTime, unsupportTime,
                     actuator1, actuator2, level, side=''):
@@ -640,21 +644,29 @@ def Walk(heelR,heelL,toeR,toeL,Allexit, Rallow, Lallow, supportTimeR, unsupportT
         return heel_value, gaittime
     
     while not Allexit.value :
+                    # --- Determine state each loop ---
+        
+        #print(f"State={state}, Pressure={pressure}, Vel={ang_vel:.2f}")
+      #  print(f" State={state}, Pressure={pressure}, Hip Raw ={raw_yaw}")
+
+        #print(f" Hip Raw ={raw_yaw} , Yaw={last_filtered:.2f}")
+
+        pressure = Applied_pressure.value
         if Rallow.value == 1:
             # IMPORTANT: assign the returned tuple back!
             last_heelR, gaittimeR = process_leg(
                 heelR.value, last_heelR, gaittimeR,
                 supportTimeR, unsupportTimeR,
-                R, RR, 0.5, side='R'
+                R, RR, level=pressure, side='R'
             )
 
         if Lallow.value == 1:
             last_heelL, gaittimeL = process_leg(
                 heelL.value, last_heelL, gaittimeL,
                 supportTimeL, unsupportTimeL,
-                L, LL, 0.7, side='L'
+                L, LL, level=pressure, side='L'
             )
-
+      #  print(pressure, flush=True)
         # APPLY once per loop with the current actuator setpoints
         if r_pressed.value == 1:
             apply_pressure(Emg_sig.value, R.value, L.value, RR.value, LL.value)
@@ -946,7 +958,77 @@ class AdaptiveFSR:
                 self.last_release_tentative = None
 
         return self.state, self.lower, self.mid, self.upper
+
+
+def low_pass_filter(new_value, last_filtered, alpha=0.1):
+    return alpha * new_value + (1 - alpha) * last_filtered
+
+
+def unwrap_heading(IMU_angle, last_angle, unwrapped_angle,
+                   heading_anchor, last_state, time_now, pressure,
+                   swaylimit=12, stable_time=3.0,
+                   stable_start=None, last_stable_angle=None):
+    """
+    Unwrap heading and determine gait state with robust stability detection.
+
+    State machine:
+      - Walking (1): within sway limit -> pressure=0.4
+      - Turning (0): outside sway -> pressure=0
+        -> Once heading stops drifting for >= stable_time, 
+           set new anchor and return to walking.
+    """
+
+    # --- Unwrap IMU angle ---
+    dtheta = IMU_angle - last_angle
+    if dtheta > 180:
+        dtheta -= 360
+    elif dtheta < -180:
+        dtheta += 360
+    new_unwrapped = unwrapped_angle + dtheta
+
+    state = last_state
+    new_pressure = pressure
+    new_anchor = heading_anchor
+    new_time_now = perf_counter()
+    new_stable_start = stable_start
+    new_last_stable_angle = last_stable_angle
+
+    # --- Logic ---
+    if last_state == 1:  # walking
+        if abs(new_unwrapped - heading_anchor) > swaylimit:
+            # left sway zone -> turning
+            state, new_pressure = 0, 0
+            new_stable_start = None
+            new_last_stable_angle = new_unwrapped
+
+    elif last_state == 0:  # turning
+        # Has heading stopped drifting?
+        if last_stable_angle is None:
+            new_last_stable_angle = new_unwrapped
+            new_stable_start = perf_counter()
+        else:
+            if abs(new_unwrapped - last_stable_angle) < 5.0:  # <5° drift, before it was 1deg
+                if new_stable_start is None:
+                    new_stable_start = perf_counter()
+                elif perf_counter() - new_stable_start >= stable_time:
+                    # Stable long enough -> resume walking
+                    state, new_pressure = 1, 0.4
+                    new_anchor = new_unwrapped
+                    new_stable_start = None
+                    new_last_stable_angle = None
+            else:
+                # Still drifting -> reset timer
+                new_last_stable_angle = new_unwrapped
+                new_stable_start = None
+
+    return (new_unwrapped, IMU_angle, state, new_pressure,
+            new_anchor, state, new_time_now, new_stable_start, new_last_stable_angle)
+
 ## MAIN: Run the script #####################################################
+
+
+
+
 if __name__ == "__main__":
     # mp. = multiple processinge
     ENABLE_LIVEPLOT = 1  # 0 will not plot live
@@ -988,6 +1070,7 @@ if __name__ == "__main__":
     RR = mp.Value('d', 0)       # Pressure output from Digital regulator of the 2nd muscle right
     LL= mp.Value('d', 0)       
     Emg_sig = mp.Value('d', 0)  # trigger EMG
+    Applied_pressure= mp.Value('d', 0)
 
     Lr = mp.Value('d', 0)       # Loadcell value for right leg
     Ll = mp.Value('d', 0)
@@ -1044,7 +1127,7 @@ if __name__ == "__main__":
         Allexit,\
         Rallow, Lallow, supportTimeR, unsupportTimeR, supportTimeL, unsupportTimeL,\
               supportTimeRAn, unsupportTimeRAn, supportTimeLAn,unsupportTimeLAn,\
-                R, L, RR, LL, Emg_sig, r_pressed))
+                R, L, RR, LL, Emg_sig, r_pressed, IMU_5z,Applied_pressure))
     # Walk = execute the actuation for walkings
    
     FSR.start() 
@@ -1151,14 +1234,38 @@ if __name__ == "__main__":
         print("\nPress R to start recording or Q to Stop and E to exit")
         print("\n Right Heel - Toe - Left Heel - Toe - Right Thigh - Shank - Left Thigh - Shank - Hip")
         
-        # Process the whole program
+        last_angle = 0
+        unwrapped = 0
+        heading_anchor = 0
+        last_state = 1
+        time_now = perf_counter()
+        pressure = 0.4
+        stable_start = None
+        last_stable_angle = None
+        heading_anchor = copy.copy(IMU_5z.value)
         while True:
+            
+            raw_yaw = copy.copy(IMU_5z.value)  # from shared variable
+
+            (unwrapped, last_angle, state, pressure,
+     heading_anchor, last_state, time_now,
+     stable_start, last_stable_angle) = unwrap_heading(
+        raw_yaw, last_angle, unwrapped,
+        heading_anchor, last_state, time_now, pressure,
+        swaylimit=30, stable_time=.8,
+        stable_start=stable_start,
+        last_stable_angle=last_stable_angle
+    )
+            Applied_pressure.value = copy.copy(pressure)
+            print(f"Yaw={unwrapped:4.1f}, heading={heading_anchor:4.2f}, State={state}, Pressure={pressure:.2f}", end ='\r')
+            #  print(f"State={state}, Pressure={pressure}, err={err_dbg:.1f} Yaw={raw_yaw:.2f}")
+
             # for recording ########################################################################################
             
      
             # IMU functions for detecting turning... can be placed here
 
-
+            
 
             if keyboard.is_pressed('r'):                
                 r_pressed.value = 1
@@ -1192,12 +1299,13 @@ if __name__ == "__main__":
                 state_LT, _,  _,  _  = det_lt.update(FSRlt.value)  # Left to
                 toeL.value = 1- state_LT
                 
-           
+               
            # print('     {:d},        {:d},       {:d},       {:d},      {:.3f},     {:.3f},    {:.3f},    {:.3f}, {:.3f}'.format(int(heelR.value),  int(toeR.value), int(heelL.value),  int(toeL.value),float(IMU_1),  float(IMU_2), float(IMU_3),  float(IMU_4), float(IMU_5)), end ='\r' ) 
           #  print('     {:f},        {:f},       {:f},       {:f},      {:.3f},     {:.3f},    {:.3f},    {:.3f}, {:.3f}'.format((FSRrh.value),  (FSRrt.value), (FSRlh.value),  (FSRlt.value),float(IMU_1),  float(IMU_2), float(IMU_3),  float(IMU_4), float(IMU_5)), end ='\r' ) 
           #  print('     {:d},        {:d},       {:d},       {:d},      {:.3f},     {:.3f},    {:.3f},    {:.3f}, {:.3f}'.format(int(heelR.value),  int(toeR.value), int(heelL.value),  int(toeL.value),float(IMU_1),  float(IMU_2), float(IMU_3),  float(IMU_4), float(IMU_5)), end ='\r' ) 
-            print('     {:d},        {:d},       {:d},       {:d},      {:.3f},     {:.3f},    {:.3f},    {:.3f}, {:.3f}'.format(int(heelR.value),  int(toeR.value), int(heelL.value),  int(toeL.value),float(IMU_1z.value),  float(IMU_2z.value), float(IMU_3z.value),  float(IMU_4z.value), float(IMU_5z.value)), end ='\r' ) 
-            
+     ##       print('     {:d},        {:d},       {:d},       {:d},      {:.3f},     {:.3f},    {:.3f},    {:.3f}, {:.3f}, {:.3f}'.format(int(heelR.value),  int(toeR.value), int(heelL.value),  int(toeL.value),float(IMU_1z.value),  float(IMU_2z.value), float(IMU_3z.value),  float(IMU_4z.value), float(IMU_5z.value), float(pressure)), end ='\r' ) 
+         #   print('     {:.3f}, {:.3f}'.format( float(IMU_5z.value), float(THETA)), end ='\r' ) 
+          #  print('            
             if keyboard.is_pressed('q') and r_pressed.value==1:
                         #taskAI.stop()
                         record_start  = 0
