@@ -750,11 +750,14 @@ def record_daq(Allexit, record_start_fd, c_time, LogFile, Lr, Ll, psRu, psRd, ps
     taskAI = nidaqmx.Task()
     taskAI.ai_channels.add_ai_voltage_chan("Dev5/ai0", min_val=0, max_val= 5)    # Loadcell right
     taskAI.ai_channels.add_ai_voltage_chan("Dev5/ai1", min_val=0, max_val= 5)    # Loadcell left
-    taskAI.ai_channels.add_ai_voltage_chan("Dev5/ai2", min_val=0, max_val= 5)    # Pressure sensor right 
-    taskAI.ai_channels.add_ai_voltage_chan("Dev5/ai3", min_val=0, max_val= 5)    # Pressure sensor left
-    taskAI.ai_channels.add_ai_voltage_chan("Dev5/ai4", min_val=0, max_val= 5)    # FSR right heel
+    taskAI.ai_channels.add_ai_voltage_chan("Dev5/ai2", min_val=0, max_val= 5)    # Pressure sensor right up
+    taskAI.ai_channels.add_ai_voltage_chan("Dev5/ai3", min_val=0, max_val= 5)    # Pressure sensor right down
+    taskAI.ai_channels.add_ai_voltage_chan("Dev5/ai4", min_val=0, max_val= 5)    # Pressure sensor left up
     
-    taskAI.ai_channels.add_ai_voltage_chan("Dev5/ai5", min_val=0, max_val= 5)    # FSR right toe
+    taskAI.ai_channels.add_ai_voltage_chan("Dev5/ai5", min_val=0, max_val= 5)    # Pressure sensor left down
+    
+    
+    
     taskAI.ai_channels.add_ai_voltage_chan("Dev5/ai6", min_val=0, max_val= 5)    # FSR left heel
     taskAI.ai_channels.add_ai_voltage_chan("Dev5/ai7", min_val=0, max_val= 5)    # FSR left toe
     taskAI.ai_channels.add_ai_voltage_chan("Dev5/ai16", min_val=0, max_val= 5)   # FSR left heel
@@ -809,41 +812,214 @@ def record_daq(Allexit, record_start_fd, c_time, LogFile, Lr, Ll, psRu, psRd, ps
 
 def Pressure_foot(Allexit,  FSRrh, FSRrt, FSRlh, FSRlt):
      
-    Pressure_serial = serial.Serial('COM15', 115200, 
+    Pressure_serialL = serial.Serial('COM17', 460800,    # left 
              parity=serial.PARITY_NONE,
              stopbits=serial.STOPBITS_ONE,
              bytesize=serial.EIGHTBITS, 
              timeout=.1)
     
     time.sleep(2)
+    Pressure_serialR = serial.Serial('COM18', 460800,    # left 
+             parity=serial.PARITY_NONE,
+             stopbits=serial.STOPBITS_ONE,
+             bytesize=serial.EIGHTBITS, 
+             timeout=.1)
+    time.sleep(2)
 
     def read_pressure():
-        line = Pressure_serial.readline().decode('utf-8').strip()  # decode bytes → string
+        line = Pressure_serialL.readline().decode('utf-8').strip()  # decode bytes → string
         if line:  # make sure it's not empty
             try:
                 parts = line.split()  # ['P1:991.865', 'P2:991.849', ...]
                 values = {p.split(":")[0]: float(p.split(":")[1]) for p in parts}
                 
                 # Extract variables
-                P1 = values.get("P1")
-                P2 = values.get("P2")
-                P3 = values.get("P3")
-                P4 = values.get("P4")
+                P3 = values.get("P1")
+                P4 = values.get("P2")
+                #P1 = values.get("P1")
+                #P2 = values.get("P2")
 
                 #print(f"P1: {P1}, P2: {P2}, P3: {P3}, P4: {P4}")
-                return P1, P2, P3, P4
+                #return P1, P2, P3, P4
             except Exception as e:
                 print(f"Parse error: {e}, line={line}")
-    
+        line = Pressure_serialR.readline().decode('utf-8').strip()  # decode bytes → string
+        if line:  # make sure it's not empty
+            try:
+                parts = line.split()  # ['P1:991.865', 'P2:991.849', ...]
+                values = {p.split(":")[0]: float(p.split(":")[1]) for p in parts}
+                
+                # Extract variables
+                #P3 = values.get("P1")
+                #P4 = values.get("P2")
+                P1 = values.get("P1")
+                P2 = values.get("P2")
+
+                #print(f"P1: {P1}, P2: {P2}, P3: {P3}, P4: {P4}")
+                #return P1, P2, P3, P4
+            except Exception as e:
+                print(f"Parse error: {e}, line={line}")
+            return P1, P2, P3, P4
     while not Allexit.value:
             Pressures = read_pressure()
             FSRrh.value, FSRrt.value, FSRlh.value, FSRlt.value = Pressures
 
 
-    Pressure_serial.close()
+    Pressure_serialL.close()
+    Pressure_serialR.close()
 
 
 class AdaptiveFSR:
+    def __init__(self,
+                 ema_alpha=0.2, hysteresis_frac=0.10,
+                 min_contact_ms=60, min_release_ms=60, min_dwell_ms=120,
+                 clip_band_min=None, clip_band_max=1e6, learn_window_steps=6):
+        self.alpha = ema_alpha
+        self.hfrac = hysteresis_frac
+        self.min_contact = min_contact_ms / 1000.0
+        self.min_release = min_release_ms / 1000.0
+        self.min_dwell   = min_dwell_ms   / 1000.0
+
+        # Will auto-choose later if None
+        self.clip_band_min = clip_band_min
+        self.clip_band_max = clip_band_max
+
+        self.contact_level   = None
+        self.nocontact_level = None
+        self.invert = None   # auto-detect later
+
+        self.curr_min = math.inf
+        self.curr_max = -math.inf
+
+        self.min_hist = deque(maxlen=learn_window_steps)
+        self.max_hist = deque(maxlen=learn_window_steps)
+
+        self.state = 0
+        self.last_change_t = 0.0
+        self.last_contact_tentative = None
+        self.last_release_tentative = None
+
+        self.mid = None
+        self.lower = None
+        self.upper = None
+
+    def _update_levels_from_cycle(self):
+        if self.curr_min < math.inf:
+            self.min_hist.append(self.curr_min)
+        if self.curr_max > -math.inf:
+            self.max_hist.append(self.curr_max)
+
+        if len(self.min_hist):
+            new_contact = sorted(self.min_hist)[len(self.min_hist)//2]
+            self.contact_level = (new_contact if self.contact_level is None
+                                  else (1 - self.alpha) * self.contact_level + self.alpha * new_contact)
+        if len(self.max_hist):
+            new_noc = sorted(self.max_hist)[len(self.max_hist)//2]
+            self.nocontact_level = (new_noc if self.nocontact_level is None
+                                    else (1 - self.alpha) * self.nocontact_level + self.alpha * new_noc)
+
+        # Decide orientation automatically once both levels exist
+        if (self.contact_level is not None) and (self.nocontact_level is not None):
+            self.invert = (self.contact_level > self.nocontact_level)
+
+        self.curr_min = math.inf
+        self.curr_max = -math.inf
+
+    def _recompute_bands(self):
+        if (self.contact_level is None) or (self.nocontact_level is None):
+            self.mid = self.lower = self.upper = None
+            return
+        rng = max(1e-9, abs(self.nocontact_level - self.contact_level))
+
+        # Auto-decide min band if not provided
+        if self.clip_band_min is None:
+            self.clip_band_min = 0.02 if rng < 50 else 5.0
+
+        band = max(self.clip_band_min, min(self.clip_band_max, self.hfrac * rng))
+        self.mid = 0.5 * (self.contact_level + self.nocontact_level)
+        self.lower = self.mid - band
+        self.upper = self.mid + band
+
+    def update(self, v, t=None):
+        if t is None:
+            t = time.perf_counter()
+
+        # Track extrema
+        if v < self.curr_min:
+            self.curr_min = v
+        if v > self.curr_max:
+            self.curr_max = v
+
+        self._recompute_bands()
+        dt_since_change = t - self.last_change_t
+
+        # Bootstrap (wait until levels exist)
+        if self.mid is None or self.invert is None:
+            if dt_since_change > 0.25:
+                self._update_levels_from_cycle()
+                self._recompute_bands()
+            return self.state, self.lower, self.mid, self.upper
+
+        # --- Hysteresis + debounce + dwell ---
+        if not self.invert:  # normal: contact < no-contact (FSR)
+            if self.state == 0:  # no-contact
+                if v >= self.lower and dt_since_change >= self.min_dwell:
+                    if self.last_contact_tentative is None:
+                        self.last_contact_tentative = t
+                    elif (t - self.last_contact_tentative) >= self.min_contact:
+                        self._update_levels_from_cycle()
+                        self.state = 1
+                        self.last_change_t = t
+                        self.last_contact_tentative = None
+                        self.curr_min = v
+                        self.curr_max = v
+                else:
+                    self.last_contact_tentative = None
+            else:  # contact
+                if v <= self.upper and dt_since_change >= self.min_dwell:
+                    if self.last_release_tentative is None:
+                        self.last_release_tentative = t
+                    elif (t - self.last_release_tentative) >= self.min_release:
+                        self._update_levels_from_cycle()
+                        self.state = 0
+                        self.last_change_t = t
+                        self.last_release_tentative = None
+                        self.curr_min = v
+                        self.curr_max = v
+                else:
+                    self.last_release_tentative = None
+
+        else:  # inverted: contact > no-contact (Pressure sensor)
+            if self.state == 0:  # no-contact
+                if v <= self.upper and dt_since_change >= self.min_dwell:
+                    if self.last_contact_tentative is None:
+                        self.last_contact_tentative = t
+                    elif (t - self.last_contact_tentative) >= self.min_contact:
+                        self._update_levels_from_cycle()
+                        self.state = 1
+                        self.last_change_t = t
+                        self.last_contact_tentative = None
+                        self.curr_min = v
+                        self.curr_max = v
+                else:
+                    self.last_contact_tentative = None
+            else:  # contact
+                if v >= self.lower and dt_since_change >= self.min_dwell:
+                    if self.last_release_tentative is None:
+                        self.last_release_tentative = t
+                    elif (t - self.last_release_tentative) >= self.min_release:
+                        self._update_levels_from_cycle()
+                        self.state = 0
+                        self.last_change_t = t
+                        self.last_release_tentative = None
+                        self.curr_min = v
+                        self.curr_max = v
+                else:
+                    self.last_release_tentative = None
+
+        return self.state, self.lower, self.mid, self.upper
+
+class AdaptiveFSR_old:
     def __init__(self, init_contact=0.2, init_nocontact=1.0,
                  ema_alpha=0.2, hysteresis_frac=0.10,
                  min_contact_ms=60, min_release_ms=60, min_dwell_ms=120,
@@ -1030,10 +1206,25 @@ def unwrap_heading(IMU_angle, last_angle, unwrapped_angle,
 
 
 if __name__ == "__main__":
+    
+    switch = mp.Value('i', 1)    # 0 ----FSR, else Pressure Sensor
+    while True:
+        try:
+            choice = int(input("Select input mode (0 = FSR, 1 = Pressure Sensor): "))
+            if choice in (0, 1):
+                switch.value = choice
+                print(f"Mode set: {'Pressure Sensor' if choice == 1 else 'FSR'}")
+                break
+            else:
+                print("Invalid input. Please enter 0 or 1 only.")
+        except ValueError:
+            print("Invalid input. Please enter a number (0 or 1).")
+    
+    
     # mp. = multiple processinge
     ENABLE_LIVEPLOT = 1  # 0 will not plot live
     imu_on = 1              # 1 means IMU will be attempted to connect, 0 otherwise
-    switch = mp.Value('i', 0)    # 0 ----FSR, else Pressure Sensor
+    
     heelR = mp.Value('i', 0) # right heel strike (HS) live state
     heelL = mp.Value('i', 0)
     toeR  = mp.Value('i', 0) # right toe strike (TS) live state
@@ -1190,12 +1381,22 @@ if __name__ == "__main__":
     #global buffer_in 
     
     firsttime = 1
-    record_interval = 0   
-    det_rh = AdaptiveFSR()  # Right Heel
-    det_rt = AdaptiveFSR()  # Right Toe
-    det_lh = AdaptiveFSR()  # Left Heel
-    det_lt = AdaptiveFSR()  # Left Toe
+    record_interval = 0  
+   
+    if switch.value == 0: # FSR
+        det_rh = AdaptiveFSR_old()  # Right Heel
+        det_rt = AdaptiveFSR_old()  # Right Toe
+        det_lh = AdaptiveFSR_old()  # Left Heel
+        det_lt = AdaptiveFSR_old()  # Left Toe
     
+    
+    else: # pressure
+        det_rh = AdaptiveFSR()  # Right Heel
+        det_rt = AdaptiveFSR()  # Right Toe
+        det_lh = AdaptiveFSR()  # Left Heel
+        det_lt = AdaptiveFSR()  # Left Toe
+         
+
     shared = {
     "Lr": Lr, "Ll": Ll,
     "R": R, "L": L, "RR": RR, "LL": LL,
@@ -1257,7 +1458,7 @@ if __name__ == "__main__":
         last_stable_angle=last_stable_angle
     )
             Applied_pressure.value = copy.copy(pressure)
-            print(f"Yaw={unwrapped:4.1f}, heading={heading_anchor:4.2f}, State={state}, Pressure={pressure:.2f}", end ='\r')
+           # print(f"Yaw={unwrapped:4.1f}, heading={heading_anchor:4.2f}, State={state}, Pressure={pressure:.2f}", end ='\r')
             #  print(f"State={state}, Pressure={pressure}, err={err_dbg:.1f} Yaw={raw_yaw:.2f}")
 
             # for recording ########################################################################################
@@ -1270,6 +1471,7 @@ if __name__ == "__main__":
             if keyboard.is_pressed('r'):                
                 r_pressed.value = 1
                 if firsttime == 1:
+                    Emg_sig.value = 3
                     c_time.value = perf_counter() # record the current time from perf_counter()
                     record_interval = copy.copy(c_time.value)
                     firsttime = 0
@@ -1282,32 +1484,43 @@ if __name__ == "__main__":
 
             ## Calculate Threshold #################################################################################
             
-            if switch.value == 0:  ##############   FSR
+            if True:#switch.value == 0:  ##############   FSR
                 
                 
                # now = time.perf_counter()
                 
                 state_RH, lo, mid, hi = det_rh.update(FSRrh.value)  # Right heel
-                heelR.value = 1- state_RH # inverting the state as heel strike produce 0 volt
                 
                 state_RT, _,  _,  _  = det_rt.update(FSRrt.value)  # Right toe
-                toeR.value = 1- state_RT
                 
                 state_LH, _,  _,  _  = det_lh.update(FSRlh.value)  # Left heel
-                heelL.value = 1- state_LH
                 
                 state_LT, _,  _,  _  = det_lt.update(FSRlt.value)  # Left to
-                toeL.value = 1- state_LT
-                
+                #"""
+                if switch.value == 0:
+                    heelR.value = 1- state_RH # inverting the state as heel strike produce 0 volt
+                    toeR.value = 1- state_RT
+                    heelL.value = 1- state_LH
+                    toeL.value = 1- state_LT
+                #"""
+                else:  # pressure
+                #if True:
+                    heelR.value = state_RH # inverting the state as heel strike produce 0 volt
+                    toeR.value = state_RT
+                    heelL.value = state_LH
+                    toeL.value = state_LT
+                                     
+
                
            # print('     {:d},        {:d},       {:d},       {:d},      {:.3f},     {:.3f},    {:.3f},    {:.3f}, {:.3f}'.format(int(heelR.value),  int(toeR.value), int(heelL.value),  int(toeL.value),float(IMU_1),  float(IMU_2), float(IMU_3),  float(IMU_4), float(IMU_5)), end ='\r' ) 
           #  print('     {:f},        {:f},       {:f},       {:f},      {:.3f},     {:.3f},    {:.3f},    {:.3f}, {:.3f}'.format((FSRrh.value),  (FSRrt.value), (FSRlh.value),  (FSRlt.value),float(IMU_1),  float(IMU_2), float(IMU_3),  float(IMU_4), float(IMU_5)), end ='\r' ) 
           #  print('     {:d},        {:d},       {:d},       {:d},      {:.3f},     {:.3f},    {:.3f},    {:.3f}, {:.3f}'.format(int(heelR.value),  int(toeR.value), int(heelL.value),  int(toeL.value),float(IMU_1),  float(IMU_2), float(IMU_3),  float(IMU_4), float(IMU_5)), end ='\r' ) 
-     ##       print('     {:d},        {:d},       {:d},       {:d},      {:.3f},     {:.3f},    {:.3f},    {:.3f}, {:.3f}, {:.3f}'.format(int(heelR.value),  int(toeR.value), int(heelL.value),  int(toeL.value),float(IMU_1z.value),  float(IMU_2z.value), float(IMU_3z.value),  float(IMU_4z.value), float(IMU_5z.value), float(pressure)), end ='\r' ) 
+            print('     {:d},        {:d},       {:d},       {:d},      {:.3f},     {:.3f},    {:.3f},    {:.3f}, {:.3f}, {:.3f}'.format(int(heelR.value),  int(toeR.value), int(heelL.value),  int(toeL.value),float(IMU_1z.value),  float(IMU_2z.value), float(IMU_3z.value),  float(IMU_4z.value), float(IMU_5z.value), float(pressure)), end ='\r' ) 
          #   print('     {:.3f}, {:.3f}'.format( float(IMU_5z.value), float(THETA)), end ='\r' ) 
           #  print('            
             if keyboard.is_pressed('q') and r_pressed.value==1:
                         #taskAI.stop()
+                        Emg_sig.value = 0
                         record_start  = 0
                         record_start_fd.value = 0
                         firsttime = 1
