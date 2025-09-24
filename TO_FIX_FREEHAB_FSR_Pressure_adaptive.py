@@ -866,10 +866,14 @@ def Pressure_foot(Allexit,  FSRrh, FSRrt, FSRlh, FSRlt):
     Pressure_serialR.close()
 
 class AdaptiveFSR:
-    def __init__(self, init_contact=0.2, init_nocontact=1.0,
+    def __init__(self, init_contact=None, init_nocontact=None,
                  ema_alpha=0.2, hysteresis_frac=0.10,
                  min_contact_ms=60, min_release_ms=60, min_dwell_ms=120,
-                 clip_band_min=0.02, clip_band_max=1e6, learn_window_steps=6):
+                 clip_band_min=10, clip_band_max=1e6, learn_window_steps=6):
+    # def __init__(self, init_contact=0.2, init_nocontact=1.0,
+    #              ema_alpha=0.2, hysteresis_frac=0.10,
+    #              min_contact_ms=60, min_release_ms=60, min_dwell_ms=120,
+    #              clip_band_min=0.02, clip_band_max=1e6, learn_window_steps=6):
         self.alpha = ema_alpha
         self.hfrac = hysteresis_frac
         self.min_contact = min_contact_ms / 1000.0
@@ -1310,16 +1314,35 @@ if __name__ == "__main__":
                # now = time.perf_counter()
                 
                 state_RH, lo, mid, hi = det_rh.update(FSRrh.value)  # Right heel
-                heelR.value = 1- state_RH # inverting the state as heel strike produce 0 volt
+                
+                if switch.value == 0:   # DAQ FSRs (contact = low)
+                    heelR.value = 1 - state_RH
+                else:                   # Pressure insoles (contact = high)
+                    heelR.value = state_RH
+                    
+                #heelR.value = 1- state_RH # inverting the state as heel strike produce 0 volt
                 
                 state_RT, _,  _,  _  = det_rt.update(FSRrt.value)  # Right toe
-                toeR.value = 1- state_RT
+                if switch.value == 0:   # DAQ FSRs (contact = low)
+                    toeR.value = 1 - state_RT
+                else:                   # Pressure insoles (contact = high)
+                    toeR.value = state_RT
+                
+                #toeR.value = 1- state_RT
                 
                 state_LH, _,  _,  _  = det_lh.update(FSRlh.value)  # Left heel
-                heelL.value = 1- state_LH
+                if switch.value == 0:   # DAQ FSRs (contact = low)
+                    heelL.value = 1 - state_LH
+                else:                   # Pressure insoles (contact = high)
+                    heelL.value = state_LH
+                #heelL.value = 1- state_LH
                 
-                state_LT, _,  _,  _  = det_lt.update(FSRlt.value)  # Left to
-                toeL.value = 1- state_LT
+                state_LT, _,  _,  _  = det_lt.update(FSRlt.value)  # Left toe
+                if switch.value == 0:   # DAQ FSRs (contact = low)
+                    toeL.value = 1 - state_LT
+                else:                   # Pressure insoles (contact = high)
+                    toeL.value = state_LT
+                #toeL.value = 1- state_LT
                 
                
            # print('     {:d},        {:d},       {:d},       {:d},      {:.3f},     {:.3f},    {:.3f},    {:.3f}, {:.3f}'.format(int(heelR.value),  int(toeR.value), int(heelL.value),  int(toeL.value),float(IMU_1),  float(IMU_2), float(IMU_3),  float(IMU_4), float(IMU_5)), end ='\r' ) 
