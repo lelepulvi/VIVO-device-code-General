@@ -594,102 +594,106 @@ def Timesforwalk(HPeriod_available_R, HPeriod_available_L,HeelRp, HeelLp,Allexit
                             supportTimeRAn.value= 0
                             unsupportTimeRAn.value= 0 
             
-## Function: execute the actuators' actuation ###########################################            
-def Walk(heelR,heelL,toeR,toeL,Allexit, Rallow, Lallow, supportTimeR, unsupportTimeR, supportTimeL, unsupportTimeL, supportTimeRAn, unsupportTimeRAn, supportTimeLAn,unsupportTimeLAn, R, L, RR, LL, Emg_sig, r_pressed, IMU_5z, Applied_pressure):
-    # Setting Arduino (run once)
+
+
+
+def Walk(heelR, heelL, toeR, toeL,
+         Allexit, Rallow, Lallow,
+         supportTimeR, unsupportTimeR,
+         supportTimeL, unsupportTimeL,
+         supportTimeRAn, unsupportTimeRAn,
+         supportTimeLAn, unsupportTimeLAn,
+         R, L, RR, LL, Emg_sig, r_pressed,
+         IMU_5z, Applied_pressure):
+    """
+    Each actuator (R, RR, L, LL) now follows its own support/unsupport window.
+    Windows may overlap.
+    """
+
+    # --- Arduino setup ---
     arduino = serial.Serial('COM15', 115200, parity=serial.PARITY_NONE,
-    stopbits=serial.STOPBITS_ONE,
-    bytesize=serial.EIGHTBITS, timeout=.1) #115200
-    # command to arduino to execute the EMG and actuators
-    z = '<0, 0.0, 0.0, 0.0, 0.0, 0.0>'
-    arduino.write(bytes(z, "utf-8"))
+                            stopbits=serial.STOPBITS_ONE,
+                            bytesize=serial.EIGHTBITS, timeout=.1)
+    arduino.write(b'<0,0,0,0,0,0>')
     time.sleep(2)
 
-    ## Internal Function: set applied pressure
-    def apply_pressure(e, r, l, rm, lm): # e = EMG, r = right actuator 1, rm = right actuator 2, ...
-       z = '<' + str(e) +',' + str(r) +',' +  str(l) +',' + str(rm) +',' + str(lm) + '>'
-     #print(z)
-       arduino.write(bytes(z, "utf-8"))
+    def apply_pressure(e, r, l, rm, lm):
+        z = f'<{e},{r},{l},{rm},{lm}>'
+        arduino.write(bytes(z, "utf-8"))
+
+    # --- Heel tracking ---
     last_heelR = 0
     last_heelL = 0
     gaittimeR = None
     gaittimeL = None
-            
 
-   
- 
-    
-# --- process_leg updates actuator1.value and actuator2.value (side-effect) ---
-    def process_leg(heel_value, last_heel, gaittime, supportTime, unsupportTime,
-                    actuator1, level, side=''):
-        # 1) Debounce: update gaittime only on rising edge (0 -> 1)
-        if heel_value == 1 and last_heel == 0:
-            gaittime = perf_counter()
-            # Debug: uncomment to see rising edges
-            # print(f"{side} rising edge at {gaittime:.4f}")
+    print("System ready — entering gait loop.")
 
-        # 2) If we've never had a heel strike, keep actuators OFF
-        if gaittime is None:
-            actuator1.value = 0
-          #  actuator2.value = 0
-            return heel_value, gaittime
-
-        # 3) Time since last heel strike
-        currenttime = perf_counter() - gaittime
-
-        # 4) Gate actuator setpoints based on support window
-        if supportTime.value <= currenttime <= unsupportTime.value:
-            actuator1.value = level
-           # actuator2.value = level
-        else:
-            actuator1.value = 0
-            #actuator2.value = 0
-
-        # 5) Return updated last_heel and gaittime (so caller saves them)
-        return heel_value, gaittime
-    
-    while not Allexit.value :
-                    # --- Determine state each loop ---
-        
-        #print(f"State={state}, Pressure={pressure}, Vel={ang_vel:.2f}")
-      #  print(f" State={state}, Pressure={pressure}, Hip Raw ={raw_yaw}")
-
-        #print(f" Hip Raw ={raw_yaw} , Yaw={last_filtered:.2f}")
-
+    # --- Main loop ---
+    while not Allexit.value:
         pressure = Applied_pressure.value
-        if Rallow.value == 1:
-            # IMPORTANT: assign the returned tuple back!
-            last_heelR, gaittimeR = process_leg(
-                heelR.value, last_heelR, gaittimeR,
-                supportTimeR, unsupportTimeR,
-                R, level=pressure, side='R'
-            )
-            last_heelR, gaittimeR = process_leg(
-                heelR.value, last_heelR, gaittimeR,
-                supportTimeRAn, unsupportTimeRAn,
-                 RR, level=pressure, side='R'
-            )
 
+        # --- RIGHT LEG ---
+        if Rallow.value == 1:
+            # Detect heel strike (rising edge)
+            if heelR.value == 1 and last_heelR == 0:
+                gaittimeR = perf_counter()
+            last_heelR = heelR.value
+
+            if gaittimeR is not None:
+                tR = perf_counter() - gaittimeR  # time since heel strike
+
+                # Main thigh actuator (R)
+                if supportTimeR.value <= tR <= unsupportTimeR.value:
+                    R.value = pressure
+                else:
+                    R.value = 0
+
+                # Ankle actuator (RR)
+                if supportTimeRAn.value <= tR <= unsupportTimeRAn.value:
+                    RR.value = pressure
+                else:
+                    RR.value = 0
+            else:
+                R.value = RR.value = 0
+
+        # --- LEFT LEG ---
         if Lallow.value == 1:
-            last_heelL, gaittimeL = process_leg(
-                heelL.value, last_heelL, gaittimeL,
-                supportTimeL, unsupportTimeL,
-                L, level=pressure, side='L'
-            )
-            last_heelL, gaittimeL = process_leg(
-                heelL.value, last_heelL, gaittimeL,
-                supportTimeLAn, unsupportTimeLAn,
-                LL, level=pressure, side='L'
-            )
-      #  print(pressure, flush=True)
-        # APPLY once per loop with the current actuator setpoints
+            # Detect heel strike (rising edge)
+            if heelL.value == 1 and last_heelL == 0:
+                gaittimeL = perf_counter()
+            last_heelL = heelL.value
+
+            if gaittimeL is not None:
+                tL = perf_counter() - gaittimeL
+
+                # Main thigh actuator (L)
+                if supportTimeL.value <= tL <= unsupportTimeL.value:
+                    L.value = pressure
+                else:
+                    L.value = 0
+
+                # Ankle actuator (LL)
+                if supportTimeLAn.value <= tL <= unsupportTimeLAn.value:
+                    LL.value = pressure
+                else:
+                    LL.value = 0
+            else:
+                L.value = LL.value = 0
+
+        # --- Send command to Arduino ---
         if r_pressed.value == 1:
             apply_pressure(Emg_sig.value, R.value, L.value, RR.value, LL.value)
         else:
             apply_pressure(0, 0, 0, 0, 0)
 
-    # Safety shutoff after loop ends
+    # --- Safety shutoff ---
     apply_pressure(0, 0, 0, 0, 0)
+   
+
+
+
+
 
     """
     while not Allexit.value :
