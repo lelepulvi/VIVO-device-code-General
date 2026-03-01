@@ -17,25 +17,30 @@ def live_plot(shared, exit_flag):
     lc_line_r, = ax1.plot([], [], label="R Loadcell")
     lc_line_l, = ax1.plot([], [], label="L Loadcell")
     ax1.set_ylabel("Loadcell (N)")
-    ax1.legend(loc="center left", bbox_to_anchor=(1, 0.5))
-
+    #ax1.legend(loc="center left", bbox_to_anchor=(1, 0.5))
+    ax1.legend(loc="upper right")
+    
     # --- Plot 2: Pressures
     pr_labels = ["R","RR","L","LL","psRu","psRd","psLu","psLd"]
     pr_lines = [ax2.plot([], [], label=lab)[0] for lab in pr_labels]
     ax2.set_ylabel("Pressure (kPa)")
-    ax2.legend(ncol=2, loc="center left", bbox_to_anchor=(1, 0.5))
+    #ax2.legend(ncol=2, loc="center left", bbox_to_anchor=(1, 0.5))
+    ax2.legend(loc="upper right")
+
 
     # --- Plot 3: IMUs
-    imu_labels = ["Right Thigh","Right Shank","Left Thigh","Left Shank","Hip"]
+    imu_labels = ["Right Knee","Left Knee","Hip"]
     imu_lines = [ax3.plot([], [], label=lab)[0] for lab in imu_labels]
     ax3.set_ylabel("IMU angle (°)")
-    ax3.legend(loc="center left", bbox_to_anchor=(1, 0.5))
+#    ax3.legend(loc="center left", bbox_to_anchor=(1, 0.5))
+    ax3.legend(loc="upper right")
 
     # --- Plot 4: FSRs
     fsr_labels = ["FSR R Heel","FSR R Toe","FSR L Heel","FSR L Toe"]
     fsr_lines = [ax4.plot([], [], label=lab)[0] for lab in fsr_labels]
     ax4.set_ylabel("FSR")
-    ax4.legend(loc="center left", bbox_to_anchor=(1, 0.5))
+ #   ax4.legend(loc="center left", bbox_to_anchor=(1, 0.5))
+    ax4.legend(loc="upper right")
 
     # --- Plot 5: Heel/Toe strikes
     ax5.set_ylim(0, 2)
@@ -65,10 +70,11 @@ def live_plot(shared, exit_flag):
                heel_bars[1],unsupp_bars[1],supp_bars[1]]
     labels = ["Left Heel","Left Unsupport","Left Support",
               "Right Heel","Right Unsupport","Right Support"]
-    ax6.legend(handles, labels, loc="center left", bbox_to_anchor=(1, 0.5))
-
+   # ax6.legend(handles, labels, loc="center left", bbox_to_anchor=(1, 0.5))
+  #  ax6.legend(loc="upper right")
+    ax6.legend(handles, labels, loc="upper right")
     # Buffers
-    t_buf, lc_bufs, pr_bufs, imu_bufs, fsr_bufs = [], [[] for _ in range(2)], [[] for _ in range(8)], [[] for _ in range(5)], [[] for _ in range(4)]
+    t_buf, lc_bufs, pr_bufs, imu_bufs, fsr_bufs = [], [[] for _ in range(2)], [[] for _ in range(8)], [[] for _ in range(3)], [[] for _ in range(4)]
     time_window = 50 # 300
 
     def update(frame):
@@ -81,8 +87,15 @@ def live_plot(shared, exit_flag):
         lc_vals = [shared["Lr"].value, shared["Ll"].value]
         pr_vals = [shared["R"].value, shared["RR"].value, shared["L"].value, shared["LL"].value,
                    shared["psRu"].value, shared["psRd"].value, shared["psLu"].value, shared["psLd"].value]
-        imu_vals = [shared["IMU_11"].value, shared["IMU_22"].value, shared["IMU_33"].value,
-                    shared["IMU_44"].value, shared["IMU_55"].value]
+       # right_knee = shared["IMU_11"].value + 180- shared["IMU_22"].value
+       # left_knee  = shared["IMU_33"].value + 180- shared["IMU_44"].value
+        
+        right_knee = shared["IMU_22"].value - shared["IMU_11"].value
+        left_knee  = shared["IMU_44"].value - shared["IMU_33"].value
+        
+         
+        hip        = shared["IMU_5z"].value
+        imu_vals = [right_knee, left_knee, hip]
         fsr_vals = [shared["FSRrh"].value, shared["FSRrt"].value, shared["FSRlh"].value, shared["FSRlt"].value]
         heelL, toeL, heelR, toeR = shared["heelL"].value, shared["toeL"].value, shared["heelR"].value, shared["toeR"].value
         heelLp, heelRp = shared["HeelLp"].value, shared["HeelRp"].value
